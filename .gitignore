@@ -2,3 +2,4 @@ build
 install
 python/caffe/_caffe.so
 python/caffe/proto/
+torcs/pre_trained/TORCS_Training_1F/
