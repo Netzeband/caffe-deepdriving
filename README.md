@@ -17,7 +17,7 @@ For further details see the instructions:
 
 Some YouTube-Videos from the project:
 
-[![Driving in TORCS on 2 Lanes](https://img.youtube.com/vi/wfYY6yeufhc/0.jpg)](https://www.youtube.com/watch?v=wfYY6yeufhc&t=3s)
+[![Driving in TORCS on 2 Lanes](https://img.youtube.com/vi/wfYY6yeufhc/0.jpg)](https://www.youtube.com/watch?v=wfYY6yeufhc)
 
 
 [![Driving in TORCS on 3 Lanes](https://img.youtube.com/vi/IafB_M4yFBo/0.jpg)](https://www.youtube.com/watch?v=IafB_M4yFBo)
