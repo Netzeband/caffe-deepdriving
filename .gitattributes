@@ -1,0 +1,4 @@
+*.binarybroto filter=lfs diff=lfs merge=lfs -text
+*.binaryproto filter=lfs diff=lfs merge=lfs -text
+*.caffemodel filter=lfs diff=lfs merge=lfs -text
+*.solverstate filter=lfs diff=lfs merge=lfs -text
