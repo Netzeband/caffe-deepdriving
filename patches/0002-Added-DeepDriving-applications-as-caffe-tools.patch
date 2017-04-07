@@ -1,0 +1,5830 @@
+From c16d0733a7e5a826a9dc63100cc4cec268c8e4b6 Mon Sep 17 00:00:00 2001
+From: Andre Netzeband <andre@netzeband.de>
+Date: Fri, 7 Apr 2017 18:06:01 +0200
+Subject: [PATCH] Added DeepDriving applications as caffe-tools
+
+---
+ .gitattributes                                     |   4 +
+ tools/CMakeLists.txt                               |  99 +++-
+ tools/torcs/Arguments.cpp                          |  43 ++
+ tools/torcs/Arguments.hpp                          |  22 +
+ tools/torcs/Database.cpp                           |  42 ++
+ tools/torcs/Database.hpp                           |  30 +
+ tools/torcs/DriveController.cpp                    | 478 +++++++++++++++
+ tools/torcs/DriveController.hpp                    |  60 ++
+ tools/torcs/ErrorMeasurement.cpp                   | 262 +++++++++
+ tools/torcs/ErrorMeasurement.hpp                   |  91 +++
+ tools/torcs/Image.cpp                              | 218 +++++++
+ tools/torcs/Image.hpp                              |  56 ++
+ tools/torcs/Indicators.cpp                         | 351 +++++++++++
+ tools/torcs/Indicators.hpp                         | 216 +++++++
+ tools/torcs/NeuralNet.cpp                          | 299 ++++++++++
+ tools/torcs/NeuralNet.hpp                          |  70 +++
+ tools/torcs/Semantic.cpp                           | 643 +++++++++++++++++++++
+ tools/torcs/Semantic.hpp                           |  81 +++
+ tools/torcs/SharedMemory.cpp                       | 253 ++++++++
+ tools/torcs/SharedMemory.hpp                       |  63 ++
+ tools/torcs_run.cpp                                | 266 +++++++++
+ tools/torcs_verify.cpp                             | 234 ++++++++
+ tools/torcs_verify_fast.cpp                        | 156 +++++
+ tools/torcs_visualize_database.cpp                 | 176 ++++++
+ torcs/pre_trained/driving_mean_1F.binaryproto      |   3 +
+ torcs/pre_trained/driving_run_1F.prototxt          | 249 ++++++++
+ torcs/pre_trained/driving_solver_1F.prototxt       |  12 +
+ torcs/pre_trained/driving_train_1F.prototxt        | 362 ++++++++++++
+ .../driving_train_1F_iter_140000.caffemodel        |   3 +
+ torcs/semantic_1lane.png                           | Bin 0 -> 836 bytes
+ torcs/semantic_2lane.png                           | Bin 0 -> 1619 bytes
+ torcs/semantic_3lane.png                           | Bin 0 -> 1783 bytes
+ torcs/semantic_background.png                      | Bin 0 -> 2250 bytes
+ torcs/semantic_background_big.png                  | Bin 0 -> 3324 bytes
+ torcs/semantic_error_background.png                | Bin 0 -> 11529 bytes
+ torcs/torcs_run.sh                                 | 105 ++++
+ torcs/torcs_train.sh                               |  56 ++
+ torcs/torcs_verify.sh                              | 106 ++++
+ torcs/torcs_verify_fast.sh                         | 106 ++++
+ torcs/torcs_visualize_database.sh                  |  30 +
+ 40 files changed, 5227 insertions(+), 18 deletions(-)
+ create mode 100644 .gitattributes
+ create mode 100644 tools/torcs/Arguments.cpp
+ create mode 100644 tools/torcs/Arguments.hpp
+ create mode 100644 tools/torcs/Database.cpp
+ create mode 100644 tools/torcs/Database.hpp
+ create mode 100644 tools/torcs/DriveController.cpp
+ create mode 100644 tools/torcs/DriveController.hpp
+ create mode 100644 tools/torcs/ErrorMeasurement.cpp
+ create mode 100644 tools/torcs/ErrorMeasurement.hpp
+ create mode 100644 tools/torcs/Image.cpp
+ create mode 100644 tools/torcs/Image.hpp
+ create mode 100644 tools/torcs/Indicators.cpp
+ create mode 100644 tools/torcs/Indicators.hpp
+ create mode 100644 tools/torcs/NeuralNet.cpp
+ create mode 100644 tools/torcs/NeuralNet.hpp
+ create mode 100644 tools/torcs/Semantic.cpp
+ create mode 100644 tools/torcs/Semantic.hpp
+ create mode 100644 tools/torcs/SharedMemory.cpp
+ create mode 100644 tools/torcs/SharedMemory.hpp
+ create mode 100644 tools/torcs_run.cpp
+ create mode 100644 tools/torcs_verify.cpp
+ create mode 100644 tools/torcs_verify_fast.cpp
+ create mode 100644 tools/torcs_visualize_database.cpp
+ create mode 100644 torcs/pre_trained/driving_mean_1F.binaryproto
+ create mode 100644 torcs/pre_trained/driving_run_1F.prototxt
+ create mode 100644 torcs/pre_trained/driving_solver_1F.prototxt
+ create mode 100644 torcs/pre_trained/driving_train_1F.prototxt
+ create mode 100644 torcs/pre_trained/driving_train_1F_iter_140000.caffemodel
+ create mode 100644 torcs/semantic_1lane.png
+ create mode 100644 torcs/semantic_2lane.png
+ create mode 100644 torcs/semantic_3lane.png
+ create mode 100644 torcs/semantic_background.png
+ create mode 100644 torcs/semantic_background_big.png
+ create mode 100644 torcs/semantic_error_background.png
+ create mode 100644 torcs/torcs_run.sh
+ create mode 100644 torcs/torcs_train.sh
+ create mode 100644 torcs/torcs_verify.sh
+ create mode 100644 torcs/torcs_verify_fast.sh
+ create mode 100644 torcs/torcs_visualize_database.sh
+
+diff --git a/.gitattributes b/.gitattributes
+new file mode 100644
+index 0000000..96d80d0
+--- /dev/null
++++ b/.gitattributes
+@@ -0,0 +1,4 @@
++*.binarybroto filter=lfs diff=lfs merge=lfs -text
++*.binaryproto filter=lfs diff=lfs merge=lfs -text
++*.caffemodel filter=lfs diff=lfs merge=lfs -text
++*.solverstate filter=lfs diff=lfs merge=lfs -text
+diff --git a/tools/CMakeLists.txt b/tools/CMakeLists.txt
+index 02fbd5c..3164256 100644
+--- a/tools/CMakeLists.txt
++++ b/tools/CMakeLists.txt
+@@ -1,29 +1,92 @@
+-# Collect source files
+-file(GLOB_RECURSE srcs ${CMAKE_CURRENT_SOURCE_DIR}/*.cpp)
+-
+-# Build each source file independently
+-foreach(source ${srcs})
+-  get_filename_component(name ${source} NAME_WE)
+-
++# function to create a tool target
++function(compile_tool Name Source)
++  
+   # caffe target already exits
+-  if(name MATCHES "caffe")
+-    set(name ${name}.bin)
++  if(Name MATCHES "caffe")
++    set(Name ${Name}.bin)
+   endif()
+ 
++  message(STATUS "Build tool ${Name}")
++  
++  foreach(File ${Source})
++    message(STATUS " * ${File}")
++  endforeach(File)
++
+   # target
+-  add_executable(${name} ${source})
+-  target_link_libraries(${name} ${Caffe_LINK})
+-  caffe_default_properties(${name})
++  add_executable(${Name} ${Source})
++  target_link_libraries(${Name} ${Caffe_LINK})
++  caffe_default_properties(${Name})
+ 
+   # set back RUNTIME_OUTPUT_DIRECTORY
+-  caffe_set_runtime_directory(${name} "${PROJECT_BINARY_DIR}/tools")
+-  caffe_set_solution_folder(${name} tools)
++  caffe_set_runtime_directory(${Name} "${PROJECT_BINARY_DIR}/tools")
++  caffe_set_solution_folder(${Name} tools)
+ 
+   # restore output name without suffix
+-  if(name MATCHES "caffe.bin")
+-    set_target_properties(${name} PROPERTIES OUTPUT_NAME caffe)
++  if(Name MATCHES "caffe.bin")
++    set_target_properties(${Name} PROPERTIES OUTPUT_NAME caffe)
+   endif()
+ 
+   # Install
+-  install(TARGETS ${name} DESTINATION bin)
+-endforeach(source)
++  install(TARGETS ${Name} DESTINATION bin)  
++endfunction(compile_tool)
++
++compile_tool(caffe caffe.cpp)
++compile_tool(compute_image_mean compute_image_mean.cpp)
++compile_tool(convert_imageset convert_imageset.cpp)
++compile_tool(device_query device_query.cpp)
++compile_tool(extract_features extract_features.cpp)
++compile_tool(finetune_net finetune_net.cpp)
++compile_tool(net_speed_benchmark net_speed_benchmark.cpp)
++compile_tool(test_net test_net.cpp)
++compile_tool(train_net train_net.cpp)
++compile_tool(upgrade_net_proto_binary upgrade_net_proto_binary.cpp)
++compile_tool(upgrade_net_proto_text upgrade_net_proto_text.cpp)
++compile_tool(upgrade_solver_proto_text upgrade_solver_proto_text.cpp)
++
++# Torcs tools are here
++set(torcs_library_source
++  torcs/Arguments.cpp
++  torcs/Database.cpp
++  torcs/Indicators.cpp
++  torcs/Semantic.cpp
++  torcs/Image.cpp
++  torcs/SharedMemory.cpp
++  torcs/DriveController.cpp
++  torcs/NeuralNet.cpp
++  torcs/ErrorMeasurement.cpp
++)
++
++set(torcs_visualize_database_source
++  torcs_visualize_database.cpp
++  ${torcs_library_source}
++)
++compile_tool(torcs_visualize_database "${torcs_visualize_database_source}")
++
++set(torcs_run_source
++  torcs_run.cpp
++  ${torcs_library_source}
++)
++compile_tool(torcs_run "${torcs_run_source}")
++
++set(torcs_verify_source
++  torcs_verify.cpp
++  ${torcs_library_source}
++)
++compile_tool(torcs_verify "${torcs_verify_source}")
++
++set(torcs_verify_fast_source
++  torcs_verify_fast.cpp
++  ${torcs_library_source}
++)
++compile_tool(torcs_verify_fast "${torcs_verify_fast_source}")
++
++#set(torcs_files
++#  torcs-files/semantic_background.png
++#  torcs-files/semantic_background_big.png
++#  torcs-files/semantic_1lane.png
++#  torcs-files/semantic_2lane.png
++#  torcs-files/semantic_3lane.png
++#)
++#
++#install(FILES ${torcs_files} DESTINATION bin)
++
+diff --git a/tools/torcs/Arguments.cpp b/tools/torcs/Arguments.cpp
+new file mode 100644
+index 0000000..25e6a44
+--- /dev/null
++++ b/tools/torcs/Arguments.cpp
+@@ -0,0 +1,43 @@
++/**
++ * Arguments.cpp
++ *
++ *  Created on: Mar 25, 2017
++ *      Author: Andre Netzeband
++ */
++
++#include "Arguments.hpp"
++
++using namespace std;
++
++string getArgument(int NumberOfArguments,  char ** ppArguments, string ArgumentName)
++{
++  for (int i = 1; i < NumberOfArguments; i++)
++  {
++    if (ppArguments[i])
++    {
++      string Argument = ppArguments[i];
++
++      if (Argument == ArgumentName)
++      {
++        if (i + 1 < NumberOfArguments)
++        {
++          if (ppArguments[i+1])
++          {
++            return ppArguments[i+1];
++          }
++        }
++      }
++    }
++    else
++    {
++      break;
++    }
++  }
++
++  return "";
++}
++
++
++
++
++
+diff --git a/tools/torcs/Arguments.hpp b/tools/torcs/Arguments.hpp
+new file mode 100644
+index 0000000..a5e9ba0
+--- /dev/null
++++ b/tools/torcs/Arguments.hpp
+@@ -0,0 +1,22 @@
++/**
++ * Arguments.hpp
++ *
++ *  Created on: Mar 25, 2017
++ *      Author: Andre Netzeband
++ */
++
++#ifndef ARGUMENTS_HPP_
++#define ARGUMENTS_HPP_
++
++#include <string>
++
++/// @brief Searches for an argument in the array of application arguments.
++/// @param NumberOfArguments The number of arguments in the array.
++/// @param ppArguments       The argument string.
++/// @param ArgumentName      The name of the argument to search for.
++/// @return It returns the next argument after the argument-name. Or it returns an empty string,
++///         if no argument was found with this name.
++std::string getArgument(int NumberOfArguments,  char ** ppArguments, std::string ArgumentName);
++
++
++#endif /* ARGUMENTS_HPP_ */
+diff --git a/tools/torcs/Database.cpp b/tools/torcs/Database.cpp
+new file mode 100644
+index 0000000..bcc1851
+--- /dev/null
++++ b/tools/torcs/Database.cpp
+@@ -0,0 +1,42 @@
++/**
++ * Database.cpp
++ *
++ *  Created on: Mar 25, 2017
++ *      Author: Andre Netzeband
++ */
++
++#include "Database.hpp"
++
++#include <glog/logging.h>
++
++#include <opencv2/imgproc/imgproc.hpp>
++#include <opencv2/highgui/highgui.hpp>
++
++using namespace caffe;
++
++CLabel::CLabel()
++{
++
++}
++
++void CLabel::readFromDatum(Datum const &rData)
++{
++  Indicators.Angle                              = rData.float_data(0);
++  Indicators.DistanceToLeftMarking              = rData.float_data(1);
++  Indicators.DistanceToCenterMarking            = rData.float_data(2);
++  Indicators.DistanceToRightMarking             = rData.float_data(3);
++  Indicators.DistanceToLeftObstacle             = rData.float_data(4);
++  Indicators.DistanceToRightObstacle            = rData.float_data(5);
++  Indicators.DistanceToLeftMarkingOfLeftLane    = rData.float_data(6);
++  Indicators.DistanceToLeftMarkingOfCenterLane  = rData.float_data(7);
++  Indicators.DistanceToRightMarkingOfCenterLane = rData.float_data(8);
++  Indicators.DistanceToRightMarkingOfRightLane  = rData.float_data(9);
++  Indicators.DistanceToLeftObstacleInLane       = rData.float_data(10);
++  Indicators.DistanceToCenterObstacleInLane     = rData.float_data(11);
++  Indicators.DistanceToRightObstacleInLane      = rData.float_data(12);
++  Indicators.Fast                               = rData.float_data(13);
++}
++
++
++
++
+diff --git a/tools/torcs/Database.hpp b/tools/torcs/Database.hpp
+new file mode 100644
+index 0000000..c715365
+--- /dev/null
++++ b/tools/torcs/Database.hpp
+@@ -0,0 +1,30 @@
++/**
++ * Database.hpp
++ *
++ *  Created on: Mar 25, 2017
++ *      Author: Andre Netzeband
++ */
++
++#ifndef DATABASE_HPP_
++#define DATABASE_HPP_
++
++#include "Indicators.hpp"
++
++#include "caffe/caffe.hpp"
++
++#include <opencv2/core/core.hpp>
++
++class CLabel
++{
++  public:
++    /// @brief The affordance indicators from the labels.
++    Indicators_t Indicators;
++
++    /// @brief Constructor.
++    CLabel();
++
++    /// @brief Reads the labels from a datum.
++    void readFromDatum(caffe::Datum const &rData);
++};
++
++#endif /* DATABASE_HPP_ */
+diff --git a/tools/torcs/DriveController.cpp b/tools/torcs/DriveController.cpp
+new file mode 100644
+index 0000000..ca41e9d
+--- /dev/null
++++ b/tools/torcs/DriveController.cpp
+@@ -0,0 +1,478 @@
++/**
++ * DriveController.cpp
++ *
++ *  Created on: Mar 25, 2017
++ *      Author: Andre Netzeband
++ *
++ *  Attention: This is a reimplementation of the code the DeepDriving project.
++ *  See http://deepdriving.cs.princeton.edu for more details.
++ *  Thus much code comes from Chenyi Chen.
++ *
++ *  Take the original DeepDriving license into account!
++ */
++
++#include "DriveController.hpp"
++
++#include <math.h>
++
++CDriveController::CDriveController():
++  slow_down(0),
++  pre_dist_L(60),
++  pre_dist_R(60),
++  left_clear(0),
++  left_timer(0),
++  right_clear(0),
++  right_timer(0),
++  timer_set(60),
++  lane_change(0),
++  steer_trend(0),
++  coe_steer(1.0),
++  center_line(0),
++  pre_ML(0),
++  pre_MR(0),
++  steering_head(0),
++  desired_speed(0)
++{
++  steering_record[0] = 0;
++  steering_record[1] = 0;
++  steering_record[2] = 0;
++  steering_record[3] = 0;
++  steering_record[4] = 0;
++}
++
++CDriveController::~CDriveController()
++{
++
++}
++
++void CDriveController::control(Indicators_t &rIndicators, TorcsData_t &rCommands, int Lanes)
++{
++  if (!(Lanes >= 1 && Lanes <= 3))
++  {
++    Lanes = rIndicators.getNumberOfLanes();
++  }
++
++  //std::cout << "Controlling: " << rCommands.IsControlling << ", Lanes: " << Lanes << std::endl;
++
++  if (rCommands.IsControlling)
++  {
++    switch(Lanes)
++    {
++      case 1:
++        controlLane1(rIndicators, rCommands);
++        break;
++
++      case 2:
++        controlLane2(rIndicators, rCommands);
++        break;
++
++      case 3:
++        controlLane3(rIndicators, rCommands);
++        break;
++    }
++  }
++}
++
++void CDriveController::controlLane3(Indicators_t &rIndicators, TorcsData_t &rCommands)
++{
++  slow_down=100;
++
++  if (pre_dist_L<20 && rIndicators.getDistLInLane()<20) {   // left lane is occupied or not
++      left_clear=0;
++      left_timer=0;
++  } else left_timer++;
++
++  if (pre_dist_R<20 && rIndicators.getDistRInLane()<20) {   // right lane is occupied or not
++      right_clear=0;
++      right_timer=0;
++  } else right_timer++;
++
++  pre_dist_L=rIndicators.getDistLInLane();
++  pre_dist_R=rIndicators.getDistRInLane();
++
++  if (left_timer>timer_set) {  // left lane is clear
++     left_timer=timer_set;
++     left_clear=1;
++  }
++
++  if (right_timer>timer_set) {  // right lane is clear
++     right_timer=timer_set;
++     right_clear=1;
++  }
++
++
++  if (lane_change==0 && rIndicators.getDistMInLane()<15) {  // if current lane is occupied
++
++     steer_trend=steering_record[0]+steering_record[1]+steering_record[2]+steering_record[3]+steering_record[4];  // am I turning or not
++
++     if (rIndicators.getLL()>-8 && left_clear==1 && steer_trend>=0 && steer_trend<0.2) {  // move to left lane
++        lane_change=-2;
++        coe_steer=6;
++        right_clear=0;
++        right_timer=0;
++        left_clear=0;
++        left_timer=30;
++        timer_set=60;
++     }
++
++     else if (rIndicators.getRR()<8 && right_clear==1 && steer_trend<=0 && steer_trend>-0.2) {  // move to right lane
++        lane_change=2;
++        coe_steer=6;
++        left_clear=0;
++        left_timer=0;
++        right_clear=0;
++        right_timer=30;
++        timer_set=60;
++     }
++
++     else {
++        float v_max=20;
++        float c=2.772;
++        float d=-0.693;
++        slow_down=v_max*(1-exp(-c/v_max*rIndicators.getDistMInLane()-d));  // optimal velocity car-following model
++        if (slow_down<0) slow_down=0;
++     }
++  }
++
++  ///////////////////////////////////////////////// prefer to stay in the central lane
++  else if (lane_change==0 && rIndicators.getDistMInLane()>=15) {
++
++     steer_trend=steering_record[0]+steering_record[1]+steering_record[2]+steering_record[3]+steering_record[4];  // am I turning or not
++
++     if (rIndicators.getRR()>8 && left_clear==1 && steer_trend>=0 && steer_trend<0.2) {  // in right lane, move to central lane
++        lane_change=-2;
++        coe_steer=6;
++        left_clear=0;
++        left_timer=30;
++     }
++
++     else if (rIndicators.getLL()<-8 && right_clear==1 && steer_trend<=0 && steer_trend>-0.2) {  // in left lane, move to central lane
++        lane_change=2;
++        coe_steer=6;
++        right_clear=0;
++        right_timer=30;
++     }
++  }
++  ///////////////////////////////////////////////// END prefer to stay in the central lane
++
++  ///////////////////////////////////////////////// implement lane changing or car-following
++  if (lane_change==0) {
++     if (-rIndicators.getML()+rIndicators.getMR()<5.5) {
++        coe_steer=1.5;
++        center_line=(rIndicators.getML()+rIndicators.getMR())/2;
++        pre_ML=rIndicators.getML();
++        pre_MR=rIndicators.getMR();
++        if (rIndicators.getM()<1)
++           coe_steer=0.4;
++     } else {
++        if (-pre_ML>pre_MR)
++           center_line=(rIndicators.getL()+rIndicators.getM())/2;
++        else
++           center_line=(rIndicators.getR()+rIndicators.getM())/2;
++        coe_steer=0.3;
++     }
++  }
++
++  else if (lane_change==-2) {
++     if (-rIndicators.getML()+rIndicators.getMR()<5.5) {
++        center_line=(rIndicators.getLL()+rIndicators.getML())/2;
++        if (rIndicators.getL()>-5 && rIndicators.getM()<1.5)
++           center_line=(center_line+(rIndicators.getL()+rIndicators.getM())/2)/2;
++     } else {
++        center_line=(rIndicators.getL()+rIndicators.getM())/2;
++        coe_steer=20;
++        lane_change=-1;
++     }
++  }
++
++  else if (lane_change==-1) {
++     if (rIndicators.getL()>-5 && rIndicators.getM()<1.5) {
++        center_line=(rIndicators.getL()+rIndicators.getM())/2;
++        if (-rIndicators.getML()+rIndicators.getMR()<5.5)
++           center_line=(center_line+(rIndicators.getML()+rIndicators.getMR())/2)/2;
++     } else {
++        center_line=(rIndicators.getML()+rIndicators.getMR())/2;
++        lane_change=0;
++     }
++  }
++
++  else if (lane_change==2) {
++     if (-rIndicators.getML()+rIndicators.getMR()<5.5) {
++        center_line=(rIndicators.getRR()+rIndicators.getMR())/2;
++        if (rIndicators.getR()<5 && rIndicators.getM()<1.5)
++           center_line=(center_line+(rIndicators.getR()+rIndicators.getM())/2)/2;
++     } else {
++        center_line=(rIndicators.getR()+rIndicators.getM())/2;
++        coe_steer=20;
++        lane_change=1;
++     }
++  }
++
++  else if (lane_change==1) {
++     if (rIndicators.getR()<5 && rIndicators.getM()<1.5) {
++        center_line=(rIndicators.getR()+rIndicators.getM())/2;
++        if (-rIndicators.getML()+rIndicators.getMR()<5.5)
++           center_line=(center_line+(rIndicators.getML()+rIndicators.getMR())/2)/2;
++     } else {
++        center_line=(rIndicators.getML()+rIndicators.getMR())/2;
++        lane_change=0;
++     }
++  }
++  ///////////////////////////////////////////////// END implement lane changing or car-following
++
++  static float const road_width = 8.0;
++  rCommands.Steering = (rIndicators.Angle - center_line/road_width) / 0.541052/coe_steer;  // steering control, "rCommands.Steering" [-1,1] is the value sent back to TORCS
++
++  if (lane_change==0 && coe_steer>1 && rCommands.Steering>0.1)   // reshape the steering control curve
++     rCommands.Steering=rCommands.Steering*(2.5*rCommands.Steering+0.75);
++
++  steering_record[steering_head]=rCommands.Steering;  // update previous steering record
++  steering_head++;
++  if (steering_head==5) steering_head=0;
++
++
++  if (rIndicators.Fast==1) desired_speed=20;
++  else desired_speed=20-fabs(steering_record[0]+steering_record[1]+steering_record[2]+steering_record[3]+steering_record[4])*4.5;
++  if (desired_speed<10) desired_speed=10;
++
++  if (slow_down<desired_speed) desired_speed=slow_down;
++
++  ///////////////////////////// speed control
++  if (desired_speed>=rCommands.Speed) {
++      rCommands.Accelerating = 0.2*(desired_speed-rCommands.Speed+1);
++      if (rCommands.Accelerating>1) rCommands.Accelerating=1.0;
++      rCommands.Breaking = 0.0;
++  } else {
++      rCommands.Breaking = 0.1*(rCommands.Speed-desired_speed);
++      if (rCommands.Breaking>1) rCommands.Breaking=1.0;
++      rCommands.Accelerating = 0.0;
++  }
++  ///////////////////////////// END speed control
++}
++
++void CDriveController::controlLane2(Indicators_t &rIndicators, TorcsData_t &rCommands)
++{
++  slow_down=100;
++
++  if (pre_dist_L<20 && rIndicators.getDistLInLane()<20) {   // left lane is occupied or not
++      left_clear=0;
++      left_timer=0;
++  } else left_timer++;
++
++  if (pre_dist_R<20 && rIndicators.getDistRInLane()<20) {   // right lane is occupied or not
++      right_clear=0;
++      right_timer=0;
++  } else right_timer++;
++
++  pre_dist_L=rIndicators.getDistLInLane();
++  pre_dist_R=rIndicators.getDistRInLane();
++
++  if (left_timer>timer_set) {   // left lane is clear
++     left_timer=timer_set;
++     left_clear=1;
++  }
++
++  if (right_timer>timer_set) {   // right lane is clear
++     right_timer=timer_set;
++     right_clear=1;
++  }
++
++
++  if (lane_change==0 && rIndicators.getDistMInLane()<15) {   // if current lane is occupied
++
++     steer_trend=steering_record[0]+steering_record[1]+steering_record[2]+steering_record[3]+steering_record[4];   // am I turning or not
++
++     if (rIndicators.getLL()>-8 && left_clear==1 && steer_trend>=0) {   // move to left lane
++        lane_change=-2;
++        coe_steer=6;
++        right_clear=0;
++        right_timer=0;
++        left_clear=0;
++        left_timer=0;
++        timer_set=30;
++     }
++
++     else if (rIndicators.getRR()<8 && right_clear==1 && steer_trend<=0) {   // move to right lane
++        lane_change=2;
++        coe_steer=6;
++        left_clear=0;
++        left_timer=0;
++        right_clear=0;
++        right_timer=0;
++        timer_set=30;
++     }
++
++     else {
++        float v_max=20;
++        float c=2.772;
++        float d=-0.693;
++        slow_down=v_max*(1-exp(-c/v_max*rIndicators.getDistMInLane()-d));  // optimal vilcity car-following model
++        if (slow_down<0) slow_down=0;
++     }
++  }
++
++  ///////////////////////////////////////////////// prefer to stay in the right lane
++  else if (lane_change==0 && rIndicators.getDistMInLane()>=15) {
++
++     steer_trend=steering_record[0]+steering_record[1]+steering_record[2]+steering_record[3]+steering_record[4];  // am I turning or not
++
++     if (rIndicators.getLL()<-8 && right_clear==1 && steer_trend<=0 && steer_trend>-0.2) {  // in left lane, move to right lane
++        lane_change=2;
++        coe_steer=6;
++        right_clear=0;
++        right_timer=20;
++     }
++  }
++  ///////////////////////////////////////////////// END prefer to stay in the right lane
++
++  ///////////////////////////////////////////////// implement lane changing or car-following
++  if (lane_change==0) {
++     if (-rIndicators.getML()+rIndicators.getMR()<5.5) {
++        coe_steer=1.5;
++        center_line=(rIndicators.getML()+rIndicators.getMR())/2;
++        pre_ML=rIndicators.getML();
++        pre_MR=rIndicators.getMR();
++        if (rIndicators.getM()<1)
++           coe_steer=0.4;
++     } else {
++        if (-pre_ML>pre_MR)
++           center_line=(rIndicators.getL()+rIndicators.getM())/2;
++        else
++           center_line=(rIndicators.getR()+rIndicators.getM())/2;
++        coe_steer=0.3;
++     }
++  }
++
++  else if (lane_change==-2) {
++     if (-rIndicators.getML()+rIndicators.getMR()<5.5) {
++        center_line=(rIndicators.getLL()+rIndicators.getML())/2;
++        if (rIndicators.getL()>-5 && rIndicators.getM()<1.5)
++           center_line=(center_line+(rIndicators.getL()+rIndicators.getM())/2)/2;
++     } else {
++        center_line=(rIndicators.getL()+rIndicators.getM())/2;
++        coe_steer=20;
++        lane_change=-1;
++     }
++  }
++
++  else if (lane_change==-1) {
++     if (rIndicators.getL()>-5 && rIndicators.getM()<1.5) {
++        center_line=(rIndicators.getL()+rIndicators.getM())/2;
++        if (-rIndicators.getML()+rIndicators.getMR()<5.5)
++           center_line=(center_line+(rIndicators.getML()+rIndicators.getMR())/2)/2;
++     } else {
++        center_line=(rIndicators.getML()+rIndicators.getMR())/2;
++        lane_change=0;
++     }
++  }
++
++  else if (lane_change==2) {
++     if (-rIndicators.getML()+rIndicators.getMR()<5.5) {
++        center_line=(rIndicators.getRR()+rIndicators.getMR())/2;
++        if (rIndicators.getR()<5 && rIndicators.getM()<1.5)
++           center_line=(center_line+(rIndicators.getR()+rIndicators.getM())/2)/2;
++     } else {
++        center_line=(rIndicators.getR()+rIndicators.getM())/2;
++        coe_steer=20;
++        lane_change=1;
++     }
++  }
++
++  else if (lane_change==1) {
++     if (rIndicators.getR()<5 && rIndicators.getM()<1.5) {
++        center_line=(rIndicators.getR()+rIndicators.getM())/2;
++        if (-rIndicators.getML()+rIndicators.getMR()<5.5)
++           center_line=(center_line+(rIndicators.getML()+rIndicators.getMR())/2)/2;
++     } else {
++        center_line=(rIndicators.getML()+rIndicators.getMR())/2;
++        lane_change=0;
++     }
++  }
++  ///////////////////////////////////////////////// END implement lane changing or car-following
++
++  static const float road_width = 8.0;
++  rCommands.Steering = (rIndicators.Angle - center_line/road_width) / 0.541052/coe_steer;   // steering control, "rCommands.Steering" [-1,1] is the value sent back to TORCS
++
++  if (lane_change==0 && coe_steer>1 && rCommands.Steering>0.1)   // reshape the steering control curve
++     rCommands.Steering=rCommands.Steering*(2.5*rCommands.Steering+0.75);
++
++  steering_record[steering_head]=rCommands.Steering;   // update previous steering record
++  steering_head++;
++  if (steering_head==5) steering_head=0;
++
++
++  if (rIndicators.Fast==1) desired_speed=20;
++  else desired_speed=20-fabs(steering_record[0]+steering_record[1]+steering_record[2]+steering_record[3]+steering_record[4])*4.5;
++  if (desired_speed<10) desired_speed=10;
++
++  if (slow_down<desired_speed) desired_speed=slow_down;
++
++  ///////////////////////////// speed control
++  if (desired_speed>=rCommands.Speed) {
++      rCommands.Accelerating = 0.2*(desired_speed-rCommands.Speed+1);
++      if (rCommands.Accelerating>1) rCommands.Accelerating=1.0;
++      rCommands.Breaking = 0.0;
++  } else {
++      rCommands.Breaking = 0.1*(rCommands.Speed-desired_speed);
++      if (rCommands.Breaking>1) rCommands.Breaking=1.0;
++      rCommands.Accelerating = 0.0;
++  }
++  ///////////////////////////// END speed control
++}
++
++void CDriveController::controlLane1(Indicators_t &rIndicators, TorcsData_t &rCommands)
++{
++  slow_down=100;
++
++  if (rIndicators.getDistMInLane()<15) {
++        float v_max=20;
++        float c=2.772;
++        float d=-0.693;
++        slow_down=v_max*(1-exp(-c/v_max*rIndicators.getDistMInLane()-d));  // optimal vilcity car-following model
++        if (slow_down<0) slow_down=0;
++  }
++
++  if (-rIndicators.getML()+rIndicators.getMR()<5.5) {
++     coe_steer=1.5;
++     center_line=(rIndicators.getML()+rIndicators.getMR())/2;
++     pre_ML=rIndicators.getML();
++     pre_MR=rIndicators.getMR();
++     if (rIndicators.getM()<1)
++        coe_steer=0.4;
++  } else {
++     if (-pre_ML>pre_MR)
++        center_line=(rIndicators.getL()+rIndicators.getM())/2;
++     else
++        center_line=(rIndicators.getR()+rIndicators.getM())/2;
++     coe_steer=0.3;
++  }
++
++  static float const road_width = 8.0;
++  rCommands.Steering = (rIndicators.Angle - center_line/road_width) / 0.541052/coe_steer;   // steering control, "rCommands.Steering" [-1,1] is the value sent back to TORCS
++
++  if (coe_steer>1 && rCommands.Steering>0.1)   // reshape the steering control curve
++     rCommands.Steering=rCommands.Steering*(2.5*rCommands.Steering+0.75);
++
++  steering_record[steering_head]=rCommands.Steering;  // update previous steering record
++  steering_head++;
++  if (steering_head==5) steering_head=0;
++
++  if (rIndicators.Fast==1) desired_speed=20;
++  else desired_speed=20-fabs(steering_record[0]+steering_record[1]+steering_record[2]+steering_record[3]+steering_record[4])*4.5;
++  if (desired_speed<10) desired_speed=10;
++
++  if (slow_down<desired_speed) desired_speed=slow_down;
++
++  ///////////////////////////// speed control
++  if (desired_speed>=rCommands.Speed) {
++      rCommands.Accelerating = 0.2*(desired_speed-rCommands.Speed+1);
++      if (rCommands.Accelerating>1) rCommands.Accelerating=1.0;
++      rCommands.Breaking = 0.0;
++  } else {
++      rCommands.Breaking = 0.1*(rCommands.Speed-desired_speed);
++      if (rCommands.Breaking>1) rCommands.Breaking=1.0;
++      rCommands.Accelerating = 0.0;
++  }
++  ///////////////////////////// END speed control
++}
++
+diff --git a/tools/torcs/DriveController.hpp b/tools/torcs/DriveController.hpp
+new file mode 100644
+index 0000000..1df8af1
+--- /dev/null
++++ b/tools/torcs/DriveController.hpp
+@@ -0,0 +1,60 @@
++/**
++ * DriveController.hpp
++ *
++ *  Created on: Mar 25, 2017
++ *      Author: Andre Netzeband
++ *
++ *  Attention: This is a reimplementation of the code the DeepDriving project.
++ *  See http://deepdriving.cs.princeton.edu for more details.
++ *  Thus much code comes from Chenyi Chen.
++ *
++ *  Take the original DeepDriving license into account!
++ */
++
++#ifndef DRIVECONTROLLER_HPP_
++#define DRIVECONTROLLER_HPP_
++
++#include "Indicators.hpp"
++#include "SharedMemory.hpp"
++
++class CDriveController
++{
++  public:
++    /// @brief Constructor.
++    CDriveController();
++
++    /// @brief Destructor.
++    ~CDriveController();
++
++    /// @brief Controls the driving commands according to the current indicators.
++    void control(Indicators_t &rIndicators, TorcsData_t &rCommands, int Lanes);
++
++  private:
++    /// TODO: Merge all functions
++    void controlLane1(Indicators_t &rIndicators, TorcsData_t &rCommands);
++    void controlLane2(Indicators_t &rIndicators, TorcsData_t &rCommands);
++    void controlLane3(Indicators_t &rIndicators, TorcsData_t &rCommands);
++
++    float slow_down;
++    float pre_dist_L;
++    float pre_dist_R;
++    int left_clear;
++    int left_timer;
++    int right_clear;
++    int right_timer;
++    int timer_set;
++    int lane_change;
++    float steer_trend;
++    float steering_record[5];
++    float coe_steer;
++    float center_line;
++    float pre_ML;
++    float pre_MR;
++    int steering_head;
++    float desired_speed;
++};
++
++
++
++
++#endif /* DRIVECONTROLLER_HPP_ */
+diff --git a/tools/torcs/ErrorMeasurement.cpp b/tools/torcs/ErrorMeasurement.cpp
+new file mode 100644
+index 0000000..b559b7d
+--- /dev/null
++++ b/tools/torcs/ErrorMeasurement.cpp
+@@ -0,0 +1,262 @@
++/*
++ * ErrorMeasurement.cpp
++ *
++ *  Created on: Mar 30, 2017
++ *      Author: netzeband
++ */
++
++#include "ErrorMeasurement.hpp"
++
++#include <algorithm>
++#include <cmath>
++
++void ErrorSummary_t::reset()
++{
++  DistLL = 0;
++  DistMM = 0;
++  DistRR = 0;
++  LL     = 0;
++  ML     = 0;
++  MR     = 0;
++  RR     = 0;
++  DistL  = 0;
++  DistR  = 0;
++  L      = 0;
++  M      = 0;
++  R      = 0;
++  Angle  = 0;
++  Fast   = 0;
++}
++
++float ErrorSummary_t::calcLoss() const
++{
++  float Loss = 0;
++
++  Loss += DistLL;
++  Loss += DistMM;
++  Loss += DistRR;
++  Loss += LL;
++  Loss += ML;
++  Loss += MR;
++  Loss += RR;
++  Loss += DistL;
++  Loss += DistR;
++  Loss += L;
++  Loss += M;
++  Loss += R;
++  Loss += Angle;
++  Loss += Fast;
++
++  return Loss * 0.5;
++}
++
++void ErrorSummary_t::print(std::ostream &rStream) const
++{
++  std::cout << "DistLL Error : " << DistLL << std::endl;
++  std::cout << "DistMM Error : " << DistMM << std::endl;
++  std::cout << "DistRR Error : " << DistRR << std::endl;
++  std::cout << "LL Error     : " << LL << std::endl;
++  std::cout << "ML Error     : " << ML << std::endl;
++  std::cout << "MR Error     : " << MR << std::endl;
++  std::cout << "RR Error     : " << RR << std::endl;
++  std::cout << "DistL Error  : " << DistL << std::endl;
++  std::cout << "DistR Error  : " << DistR << std::endl;
++  std::cout << "L Error      : " << L << std::endl;
++  std::cout << "M Error      : " << M << std::endl;
++  std::cout << "R Error      : " << R << std::endl;
++  std::cout << "Angle Error  : " << Angle << std::endl;
++  std::cout << "Fast Error   : " << Fast << std::endl;
++  std::cout << "Loss         : " << calcLoss() << std::endl;
++}
++
++CErrorMeasurement::CErrorMeasurement():
++  NumberOfMeasurements(0)
++{
++  CurrentSquaredError.reset();
++  MeanSquaredError.reset();
++  CurrentAbsoluteError.reset();
++  MeanAbsoluteError.reset();
++  StandardDeviation.reset();
++}
++
++CErrorMeasurement::~CErrorMeasurement()
++{
++
++}
++
++void CErrorMeasurement::measureBatch(Indicators_t * pEstimatedArray, CLabel * pLabelArray, int BatchSize)
++{
++  for (int i = 0; i < BatchSize; i++)
++  {
++    measure(&pLabelArray[i].Indicators, &pEstimatedArray[i]);
++  }
++}
++
++static float getAbsoluteError(float Y, float Z)
++{
++  float const Diff = Y - Z;
++  return std::abs(Diff);
++}
++
++void CErrorMeasurement::measure(Indicators_t * pGroundTruth, Indicators_t * pEstimated)
++{
++  CurrentAbsoluteError.DistLL = getAbsoluteError(
++      pGroundTruth->getDistLInLane(),
++      pEstimated->getDistLInLane()) / 95;
++
++  CurrentAbsoluteError.DistMM = getAbsoluteError(
++      pGroundTruth->getDistMInLane(),
++      pEstimated->getDistMInLane()) / 95;
++
++  CurrentAbsoluteError.DistRR = getAbsoluteError(
++      pGroundTruth->getDistRInLane(),
++      pEstimated->getDistRInLane()) / 95;
++
++  CurrentAbsoluteError.LL = getAbsoluteError(
++      pGroundTruth->getLL(),
++      pEstimated->getLL()) * 0.14545;
++
++  CurrentAbsoluteError.ML = getAbsoluteError(
++      pGroundTruth->getML(),
++      pEstimated->getML()) * 0.16;
++
++  CurrentAbsoluteError.MR = getAbsoluteError(
++      pGroundTruth->getMR(),
++      pEstimated->getMR()) * 0.16;
++
++  CurrentAbsoluteError.RR = getAbsoluteError(
++      pGroundTruth->getRR(),
++      pEstimated->getRR()) * 0.14545;
++
++  CurrentAbsoluteError.DistL = getAbsoluteError(
++      pGroundTruth->getDistLOnMarking(),
++      pEstimated->getDistLOnMarking()) / 95;
++
++  CurrentAbsoluteError.DistR = getAbsoluteError(
++      pGroundTruth->getDistROnMarking(),
++      pEstimated->getDistROnMarking()) / 95;
++
++  CurrentAbsoluteError.L = getAbsoluteError(
++      pGroundTruth->getL(),
++      pEstimated->getL()) * 0.17778;
++
++  CurrentAbsoluteError.M = getAbsoluteError(
++      pGroundTruth->getM(),
++      pEstimated->getM()) * 0.14545;
++
++  CurrentAbsoluteError.R = getAbsoluteError(
++      pGroundTruth->getR(),
++      pEstimated->getR()) * 0.17778;
++
++  CurrentAbsoluteError.Angle = std::min(1.0, std::max(0.0, getAbsoluteError(
++      pGroundTruth->Angle,
++      pEstimated->Angle) * 1.1));
++
++  CurrentAbsoluteError.Fast = getAbsoluteError(
++      pGroundTruth->Fast,
++      pEstimated->Fast) * 0.6;
++
++
++  CurrentSquaredError.DistLL = CurrentAbsoluteError.DistLL * CurrentAbsoluteError.DistLL;
++  CurrentSquaredError.DistMM = CurrentAbsoluteError.DistMM * CurrentAbsoluteError.DistMM;
++  CurrentSquaredError.DistRR = CurrentAbsoluteError.DistRR * CurrentAbsoluteError.DistRR;
++  CurrentSquaredError.LL     = CurrentAbsoluteError.LL * CurrentAbsoluteError.LL;
++  CurrentSquaredError.ML     = CurrentAbsoluteError.ML * CurrentAbsoluteError.ML;
++  CurrentSquaredError.MR     = CurrentAbsoluteError.MR * CurrentAbsoluteError.MR;
++  CurrentSquaredError.RR     = CurrentAbsoluteError.RR * CurrentAbsoluteError.RR;
++  CurrentSquaredError.DistL  = CurrentAbsoluteError.DistL * CurrentAbsoluteError.DistL;
++  CurrentSquaredError.DistR  = CurrentAbsoluteError.DistR * CurrentAbsoluteError.DistR;
++  CurrentSquaredError.L      = CurrentAbsoluteError.L * CurrentAbsoluteError.L;
++  CurrentSquaredError.M      = CurrentAbsoluteError.M * CurrentAbsoluteError.M;
++  CurrentSquaredError.R      = CurrentAbsoluteError.R * CurrentAbsoluteError.R;
++  CurrentSquaredError.Angle  = CurrentAbsoluteError.Angle * CurrentAbsoluteError.Angle;
++  CurrentSquaredError.Fast   = CurrentAbsoluteError.Fast * CurrentAbsoluteError.Fast;
++
++  calculateMeanValues();
++}
++
++void CErrorMeasurement::calculateMeanValues()
++{
++  MeanSquaredError.DistLL  = (MeanSquaredError.DistLL * NumberOfMeasurements + CurrentSquaredError.DistLL)/(NumberOfMeasurements+1);
++  MeanSquaredError.DistMM  = (MeanSquaredError.DistMM * NumberOfMeasurements + CurrentSquaredError.DistMM)/(NumberOfMeasurements+1);
++  MeanSquaredError.DistRR  = (MeanSquaredError.DistRR * NumberOfMeasurements + CurrentSquaredError.DistRR)/(NumberOfMeasurements+1);
++  MeanSquaredError.LL      = (MeanSquaredError.LL     * NumberOfMeasurements + CurrentSquaredError.LL    )/(NumberOfMeasurements+1);
++  MeanSquaredError.ML      = (MeanSquaredError.ML     * NumberOfMeasurements + CurrentSquaredError.ML    )/(NumberOfMeasurements+1);
++  MeanSquaredError.MR      = (MeanSquaredError.MR     * NumberOfMeasurements + CurrentSquaredError.MR    )/(NumberOfMeasurements+1);
++  MeanSquaredError.RR      = (MeanSquaredError.RR     * NumberOfMeasurements + CurrentSquaredError.RR    )/(NumberOfMeasurements+1);
++  MeanSquaredError.DistL   = (MeanSquaredError.DistL  * NumberOfMeasurements + CurrentSquaredError.DistL )/(NumberOfMeasurements+1);
++  MeanSquaredError.DistR   = (MeanSquaredError.DistL  * NumberOfMeasurements + CurrentSquaredError.DistL )/(NumberOfMeasurements+1);
++  MeanSquaredError.L       = (MeanSquaredError.L      * NumberOfMeasurements + CurrentSquaredError.L     )/(NumberOfMeasurements+1);
++  MeanSquaredError.M       = (MeanSquaredError.M      * NumberOfMeasurements + CurrentSquaredError.M     )/(NumberOfMeasurements+1);
++  MeanSquaredError.R       = (MeanSquaredError.R      * NumberOfMeasurements + CurrentSquaredError.R     )/(NumberOfMeasurements+1);
++  MeanSquaredError.Angle   = (MeanSquaredError.Angle  * NumberOfMeasurements + CurrentSquaredError.Angle )/(NumberOfMeasurements+1);
++  MeanSquaredError.Fast    = (MeanSquaredError.Fast   * NumberOfMeasurements + CurrentSquaredError.Fast  )/(NumberOfMeasurements+1);
++
++  MeanAbsoluteError.DistLL = (MeanAbsoluteError.DistLL * NumberOfMeasurements + CurrentAbsoluteError.DistLL)/(NumberOfMeasurements+1);
++  MeanAbsoluteError.DistMM = (MeanAbsoluteError.DistMM * NumberOfMeasurements + CurrentAbsoluteError.DistMM)/(NumberOfMeasurements+1);
++  MeanAbsoluteError.DistRR = (MeanAbsoluteError.DistRR * NumberOfMeasurements + CurrentAbsoluteError.DistRR)/(NumberOfMeasurements+1);
++  MeanAbsoluteError.LL     = (MeanAbsoluteError.LL     * NumberOfMeasurements + CurrentAbsoluteError.LL    )/(NumberOfMeasurements+1);
++  MeanAbsoluteError.ML     = (MeanAbsoluteError.ML     * NumberOfMeasurements + CurrentAbsoluteError.ML    )/(NumberOfMeasurements+1);
++  MeanAbsoluteError.MR     = (MeanAbsoluteError.MR     * NumberOfMeasurements + CurrentAbsoluteError.MR    )/(NumberOfMeasurements+1);
++  MeanAbsoluteError.RR     = (MeanAbsoluteError.RR     * NumberOfMeasurements + CurrentAbsoluteError.RR    )/(NumberOfMeasurements+1);
++  MeanAbsoluteError.DistL  = (MeanAbsoluteError.DistL  * NumberOfMeasurements + CurrentAbsoluteError.DistL )/(NumberOfMeasurements+1);
++  MeanAbsoluteError.DistR  = (MeanAbsoluteError.DistL  * NumberOfMeasurements + CurrentAbsoluteError.DistL )/(NumberOfMeasurements+1);
++  MeanAbsoluteError.L      = (MeanAbsoluteError.L      * NumberOfMeasurements + CurrentAbsoluteError.L     )/(NumberOfMeasurements+1);
++  MeanAbsoluteError.M      = (MeanAbsoluteError.M      * NumberOfMeasurements + CurrentAbsoluteError.M     )/(NumberOfMeasurements+1);
++  MeanAbsoluteError.R      = (MeanAbsoluteError.R      * NumberOfMeasurements + CurrentAbsoluteError.R     )/(NumberOfMeasurements+1);
++  MeanAbsoluteError.Angle  = (MeanAbsoluteError.Angle  * NumberOfMeasurements + CurrentAbsoluteError.Angle )/(NumberOfMeasurements+1);
++  MeanAbsoluteError.Fast   = (MeanAbsoluteError.Fast   * NumberOfMeasurements + CurrentAbsoluteError.Fast  )/(NumberOfMeasurements+1);
++
++  NumberOfMeasurements++;
++}
++
++ErrorSummary_t const & CErrorMeasurement::getStandardDeviation()
++{
++  calculateStandardDeviation();
++
++  return StandardDeviation;
++}
++
++void CErrorMeasurement::calculateStandardDeviation()
++{
++  StandardDeviation.DistLL = std::sqrt(MeanSquaredError.DistLL - MeanAbsoluteError.DistLL * MeanAbsoluteError.DistLL);
++  StandardDeviation.DistMM = std::sqrt(MeanSquaredError.DistMM - MeanAbsoluteError.DistMM * MeanAbsoluteError.DistMM);
++  StandardDeviation.DistRR = std::sqrt(MeanSquaredError.DistRR - MeanAbsoluteError.DistRR * MeanAbsoluteError.DistRR);
++  StandardDeviation.LL     = std::sqrt(MeanSquaredError.LL     - MeanAbsoluteError.LL     * MeanAbsoluteError.LL);
++  StandardDeviation.ML     = std::sqrt(MeanSquaredError.ML     - MeanAbsoluteError.ML     * MeanAbsoluteError.ML);
++  StandardDeviation.MR     = std::sqrt(MeanSquaredError.MR     - MeanAbsoluteError.MR     * MeanAbsoluteError.MR);
++  StandardDeviation.RR     = std::sqrt(MeanSquaredError.RR     - MeanAbsoluteError.RR     * MeanAbsoluteError.RR);
++  StandardDeviation.DistL  = std::sqrt(MeanSquaredError.DistL  - MeanAbsoluteError.DistL  * MeanAbsoluteError.DistL);
++  StandardDeviation.DistR  = std::sqrt(MeanSquaredError.DistR  - MeanAbsoluteError.DistR  * MeanAbsoluteError.DistR);
++  StandardDeviation.L      = std::sqrt(MeanSquaredError.L      - MeanAbsoluteError.L      * MeanAbsoluteError.L);
++  StandardDeviation.M      = std::sqrt(MeanSquaredError.M      - MeanAbsoluteError.M      * MeanAbsoluteError.M);
++  StandardDeviation.R      = std::sqrt(MeanSquaredError.R      - MeanAbsoluteError.R      * MeanAbsoluteError.R);
++  StandardDeviation.Angle  = std::sqrt(MeanSquaredError.Angle  - MeanAbsoluteError.Angle  * MeanAbsoluteError.Angle);
++  StandardDeviation.Fast   = std::sqrt(MeanSquaredError.Fast   - MeanAbsoluteError.Fast   * MeanAbsoluteError.Fast);
++}
++
++void CErrorMeasurement::print(std::ostream &rStream)
++{
++  calculateStandardDeviation();
++
++  std::cout << "Error Measurements:" << std::endl;
++  std::cout << " Type   \t MAE \t\t SD \t\t MSE " << std::endl;
++  std::cout << " DistLL \t " << MeanAbsoluteError.DistLL     << " \t " << StandardDeviation.DistLL     << " \t " << MeanSquaredError.DistLL     << std::endl;
++  std::cout << " DistMM \t " << MeanAbsoluteError.DistMM     << " \t " << StandardDeviation.DistMM     << " \t " << MeanSquaredError.DistMM     << std::endl;
++  std::cout << " DistRR \t " << MeanAbsoluteError.DistRR     << " \t " << StandardDeviation.DistRR     << " \t " << MeanSquaredError.DistRR     << std::endl;
++  std::cout << " LL     \t " << MeanAbsoluteError.LL         << " \t " << StandardDeviation.LL         << " \t " << MeanSquaredError.LL         << std::endl;
++  std::cout << " ML     \t " << MeanAbsoluteError.ML         << " \t " << StandardDeviation.ML         << " \t " << MeanSquaredError.ML         << std::endl;
++  std::cout << " MR     \t " << MeanAbsoluteError.MR         << " \t " << StandardDeviation.MR         << " \t " << MeanSquaredError.MR         << std::endl;
++  std::cout << " RR     \t " << MeanAbsoluteError.RR         << " \t " << StandardDeviation.RR         << " \t " << MeanSquaredError.RR         << std::endl;
++  std::cout << " DistL  \t " << MeanAbsoluteError.DistL      << " \t " << StandardDeviation.DistL      << " \t " << MeanSquaredError.DistL      << std::endl;
++  std::cout << " DistR  \t " << MeanAbsoluteError.DistR      << " \t " << StandardDeviation.DistR      << " \t " << MeanSquaredError.DistR      << std::endl;
++  std::cout << " L      \t " << MeanAbsoluteError.L          << " \t " << StandardDeviation.L          << " \t " << MeanSquaredError.L          << std::endl;
++  std::cout << " M      \t " << MeanAbsoluteError.M          << " \t " << StandardDeviation.M          << " \t " << MeanSquaredError.M          << std::endl;
++  std::cout << " R      \t " << MeanAbsoluteError.R          << " \t " << StandardDeviation.R          << " \t " << MeanSquaredError.R          << std::endl;
++  std::cout << " Angle  \t " << MeanAbsoluteError.Angle      << " \t " << StandardDeviation.Angle      << " \t " << MeanSquaredError.Angle      << std::endl;
++  std::cout << " Fast   \t " << MeanAbsoluteError.Fast       << " \t " << StandardDeviation.Fast       << " \t " << MeanSquaredError.Fast       << std::endl;
++  std::cout << " Sum    \t " << MeanAbsoluteError.calcLoss() << " \t " << StandardDeviation.calcLoss() << " \t " << MeanSquaredError.calcLoss() << std::endl;
++  std::cout << "Number of Error Measurements: " << NumberOfMeasurements << std::endl;
++}
++
++
+diff --git a/tools/torcs/ErrorMeasurement.hpp b/tools/torcs/ErrorMeasurement.hpp
+new file mode 100644
+index 0000000..5f1f327
+--- /dev/null
++++ b/tools/torcs/ErrorMeasurement.hpp
+@@ -0,0 +1,91 @@
++/*
++ * ErrorMeasurement.hpp
++ *
++ *  Created on: Mar 30, 2017
++ *      Author: netzeband
++ */
++
++#ifndef ERRORMEASUREMENT_HPP_
++#define ERRORMEASUREMENT_HPP_
++
++#include "Indicators.hpp"
++#include "Database.hpp"
++
++#include <iostream>
++
++typedef struct ErrorSummary_t
++{
++  public:
++    float DistLL;
++    float DistMM;
++    float DistRR;
++    float LL;
++    float ML;
++    float MR;
++    float RR;
++    float DistL;
++    float DistR;
++    float L;
++    float M;
++    float R;
++    float Angle;
++    float Fast;
++
++    void reset();
++    float calcLoss() const;
++    void print(std::ostream &rStream) const;
++
++} ErrorSummary_t;
++
++class CErrorMeasurement
++{
++  public:
++    /// @brief Constructor.
++    CErrorMeasurement();
++
++    /// @brief Destructor.
++    ~CErrorMeasurement();
++
++    /// @brief Measures the error between estimated and ground truth indicators.
++    /// @param pGroundTruth Is the ground truth indicator.
++    /// @param pEstimated   Is the estimated indicator.
++    void measure(Indicators_t * pGroundTruth, Indicators_t * pEstimated);
++
++    void measureBatch(Indicators_t * pEstimatedArray, CLabel * pLabelArray, int BatchSize);
++
++    /// @return Returns the squared error measurement values for the last measurement.
++    ErrorSummary_t const & getCurrentSquaredError() const { return CurrentSquaredError; }
++
++    /// @return Returns the mean squared error measurement values for all measurements.
++    ErrorSummary_t const & getMeanSequaredError() const { return MeanSquaredError; }
++
++    /// @return Returns the absolute error measurement values for the last measurement.
++    ErrorSummary_t const & getCurrentAbsuluteError() const { return CurrentAbsoluteError; }
++
++    /// @return Returns the mean absolute error measurement values for all measurements.
++    ErrorSummary_t const & getMeanAbsoluteError() const { return MeanAbsoluteError; }
++
++    /// @return Returns the standard deviation of the error measurement values.
++    ErrorSummary_t const & getStandardDeviation();
++
++    /// @brief Prints the error mean statistics.
++    void print(std::ostream &rStream);
++
++    /// @brief Returns the number of measurements.
++    int getMeasurements() const { return NumberOfMeasurements;}
++
++  private:
++    ErrorSummary_t CurrentSquaredError;
++    ErrorSummary_t MeanSquaredError;
++    ErrorSummary_t CurrentAbsoluteError;
++    ErrorSummary_t MeanAbsoluteError;
++    ErrorSummary_t StandardDeviation;
++    unsigned long  NumberOfMeasurements;
++
++    void calculateMeanValues();
++    void calculateStandardDeviation();
++};
++
++
++
++#endif /* ERRORMEASUREMENT_HPP_ */
+diff --git a/tools/torcs/Image.cpp b/tools/torcs/Image.cpp
+new file mode 100644
+index 0000000..a42e5ba
+--- /dev/null
++++ b/tools/torcs/Image.cpp
+@@ -0,0 +1,218 @@
++/**
++ * Image.cpp
++ *
++ *  Created on: Mar 26, 2017
++ *      Author: Andre Netzeband
++ */
++
++#include "Image.hpp"
++
++#include <glog/logging.h>
++
++#include <opencv2/core/core.hpp>
++#include <opencv2/highgui/highgui.hpp>
++#include <opencv2/highgui/highgui_c.h>
++#include <opencv2/imgproc/imgproc.hpp>
++#include <opencv2/imgproc/imgproc_c.h>
++
++using namespace caffe;
++using namespace std;
++
++CImage::CImage():
++    pCurrentWindowName(0),
++    ImageHeight(0),
++    ImageWidth(0),
++    ImageChannels(0),
++    pImage(0),
++    pOriginalImage(0)
++{
++
++}
++
++CImage::~CImage()
++{
++  destroyWindow();
++
++  if (pOriginalImage)
++  {
++    cvReleaseImage(&pOriginalImage);
++  }
++
++  if (pImage)
++  {
++    cvReleaseImage(&pImage);
++  }
++}
++
++void CImage::readFromDatum(caffe::Datum const &rData)
++{
++  // must always be 3 since the data input excepts 3 channels
++  CHECK(rData.channels() == 3);
++
++  int32_t Height   = rData.height();
++  int32_t Width    = rData.width();
++  int32_t Channels = rData.channels();
++
++  setImage(Height, Width, Channels);
++
++  if (pImage)
++  {
++    // must always be 3 since the data input excepts 3 channels
++    CHECK(ImageChannels == 3);
++
++    string const Bytes = rData.data();
++    for (int h = 0; h < ImageHeight; ++h)
++    {
++      for (int w = 0; w < ImageWidth; ++w)
++      {
++        pImage->imageData[(h*ImageWidth+w)*3+0]=(uint8_t)Bytes[h*ImageWidth+w];
++        pImage->imageData[(h*ImageWidth+w)*3+1]=(uint8_t)Bytes[ImageHeight*ImageWidth+h*ImageWidth+w];
++        pImage->imageData[(h*ImageWidth+w)*3+2]=(uint8_t)Bytes[ImageHeight*ImageWidth*2+h*ImageWidth+w];
++      }
++    }
++  }
++}
++
++void CImage::readFromMemory(uint8_t * pMemory, int SourceWidth, int SourceHeight)
++{
++  readFromMemory(pMemory, SourceWidth, SourceHeight, SourceWidth, SourceHeight);
++}
++
++void CImage::readFromMemory(uint8_t * pMemory, int SourceWidth, int SourceHeight, int TargetWidth, int TargetHeight)
++{
++  IplImage * pTempImage = 0;
++  bool HasSourceAndTargetSameSize = (SourceWidth == TargetWidth && SourceHeight == TargetHeight);
++
++  setImage(TargetHeight, TargetWidth, 3);
++
++  if (HasSourceAndTargetSameSize)
++  {
++    pTempImage = pImage;
++  }
++  else
++  {
++    if (!pOriginalImage)
++    {
++      pOriginalImage = cvCreateImage(cvSize(SourceWidth, SourceHeight), IPL_DEPTH_8U, 3);
++    }
++    else if (SourceWidth != pOriginalImage->width || SourceHeight != pOriginalImage->height)
++    {
++      cvReleaseImage(&pOriginalImage);
++      pOriginalImage = cvCreateImage(cvSize(SourceWidth, SourceHeight), IPL_DEPTH_8U, 3);
++    }
++
++    pTempImage = pOriginalImage;
++  }
++
++  if (pTempImage)
++  {
++    for (int h = 0; h < SourceHeight; ++h)
++    {
++      for (int w = 0; w < SourceWidth; ++w)
++      {
++        pTempImage->imageData[(h*SourceWidth+w)*3+2]=pMemory[((SourceHeight-h-1)*SourceWidth+w)*3+0];
++        pTempImage->imageData[(h*SourceWidth+w)*3+1]=pMemory[((SourceHeight-h-1)*SourceWidth+w)*3+1];
++        pTempImage->imageData[(h*SourceWidth+w)*3+0]=pMemory[((SourceHeight-h-1)*SourceWidth+w)*3+2];
++      }
++    }
++  }
++
++  if (!HasSourceAndTargetSameSize)
++  {
++    cvResize(pOriginalImage, pImage);
++  }
++}
++
++void CImage::setNoVideo(int TargetWidth, int TargetHeight)
++{
++  setImage(TargetHeight, TargetWidth, 3);
++
++  if (pImage)
++  {
++    for (int h = 0; h < TargetHeight; ++h)
++    {
++      for (int w = 0; w < TargetWidth; ++w)
++      {
++        uint8_t White = rand() & 0xFF;
++
++        pImage->imageData[(h*TargetWidth+w)*3+2]=White;
++        pImage->imageData[(h*TargetWidth+w)*3+1]=White;
++        pImage->imageData[(h*TargetWidth+w)*3+0]=White;
++      }
++    }
++  }
++
++  CvFont Font;
++  cvInitFont(&Font, CV_FONT_HERSHEY_TRIPLEX, 1, 1, 1, 2, 8);
++  cvPutText(pImage, "- No Signal -", cvPoint(TargetWidth/2-125, TargetHeight/2+5), &Font, cvScalar(0, 0, 255));
++}
++
++void CImage::show(std::string &rWindowName)
++{
++  show(rWindowName.c_str());
++}
++
++void CImage::show(char const * const pName)
++{
++  setWindow(pName);
++
++  if (pImage && pCurrentWindowName)
++  {
++    cvShowImage(pCurrentWindowName, pImage);
++  }
++}
++
++void CImage::setWindow(char const * const pName)
++{
++  if (pName)
++  {
++    if (pCurrentWindowName != pName)
++    {
++      destroyWindow();
++
++      pCurrentWindowName = pName;
++
++      cvNamedWindow(pCurrentWindowName, 1);
++    }
++  }
++}
++
++void CImage::destroyWindow()
++{
++  if (pCurrentWindowName)
++  {
++    cvDestroyWindow(pCurrentWindowName);
++    pCurrentWindowName = 0;
++  }
++}
++
++void CImage::setImage(int32_t Height, int32_t Width, int32_t Channels)
++{
++  if (!pImage || Height != ImageHeight || Width != ImageWidth || Channels != ImageChannels)
++  {
++    destroyImage();
++
++    ImageHeight   = Height;
++    ImageWidth    = Width;
++
++    CHECK(Channels == 3);
++    ImageChannels = 3;
++    pImage = cvCreateImage(cvSize(ImageWidth, ImageHeight), IPL_DEPTH_8U, ImageChannels);
++  }
++}
++
++void CImage::destroyImage()
++{
++  if (pImage)
++  {
++    cvReleaseImage(&pImage);
++  }
++}
++
++IplImage * CImage::getImage()
++{
++  return pImage;
++}
++
++
++
+diff --git a/tools/torcs/Image.hpp b/tools/torcs/Image.hpp
+new file mode 100644
+index 0000000..f0255ad
+--- /dev/null
++++ b/tools/torcs/Image.hpp
+@@ -0,0 +1,56 @@
++/**
++ * Image.hpp
++ *
++ *  Created on: Mar 26, 2017
++ *      Author: Andre Netzeband
++ */
++
++#ifndef IMAGE_HPP_
++#define IMAGE_HPP_
++
++#include "caffe/caffe.hpp"
++
++#include <opencv2/core/core.hpp>
++
++class CImage
++{
++  public:
++    /// @brief Constructor.
++    CImage();
++
++    /// @brief Destructor.
++    ~CImage();
++
++    /// @brief Reads the image form a datum.
++    void readFromDatum(caffe::Datum const &rData);
++
++    /// @brief Read the image from memory location.
++    void readFromMemory(uint8_t * pMemory, int SourceWidth, int SourceHeight);
++    void readFromMemory(uint8_t * pMemory, int SourceWidth, int SourceHeight, int TargetWidth, int TargetHeight);
++
++    /// @brief Sets a random black/white image with the text "No Video".
++    void setNoVideo(int TargetWidth, int TargetHeight);
++
++    /// @brief Shows the image in a window.
++    void show(std::string &rWindowName);
++    void show(char const * const pName);
++
++    /// @brief Returns the image pointer.
++    IplImage * getImage();
++
++  private:
++    void setWindow(char const * const pName);
++    void destroyWindow();
++
++    void setImage(int32_t Height, int32_t Weight, int32_t Channels);
++    void destroyImage();
++
++    char const * pCurrentWindowName;
++    int32_t      ImageHeight;
++    int32_t      ImageWidth;
++    int32_t      ImageChannels;
++    IplImage   * pImage;
++    IplImage   * pOriginalImage;
++};
++
++#endif /* IMAGE_HPP_ */
+diff --git a/tools/torcs/Indicators.cpp b/tools/torcs/Indicators.cpp
+new file mode 100644
+index 0000000..7eeee7c
+--- /dev/null
++++ b/tools/torcs/Indicators.cpp
+@@ -0,0 +1,351 @@
++/**
++ * Indicators.cpp
++ *
++ *  Created on: Mar 25, 2017
++ *      Author: Andre Netzeband
++ */
++
++#include <cmath>
++
++#include "Indicators.hpp"
++
++float const Indicators::LaneWidth = 4.0;
++float const Indicators::MaxLaneWidth = Indicators::LaneWidth * 1.375; // +37,5% tolerance
++
++float const Indicators::MaxRR = 8;
++float const Indicators::MaxMR = 5;
++float const Indicators::MaxML = -Indicators::MaxMR;
++float const Indicators::MaxLL = -Indicators::MaxRR;
++
++float const Indicators::MaxR  = 6.5;
++float const Indicators::MaxM  = 3;
++float const Indicators::MaxL  = -Indicators::MaxR;
++
++float const Indicators::MaxObstacleDist = 50;
++
++Indicators::Indicators()
++{
++  Angle                              = 0;
++  DistanceToLeftMarking              = 0;
++  DistanceToCenterMarking            = 0;
++  DistanceToRightMarking             = 0;
++  DistanceToLeftObstacle             = 0;
++  DistanceToRightObstacle            = 0;
++  DistanceToLeftMarkingOfLeftLane    = 0;
++  DistanceToLeftMarkingOfCenterLane  = 0;
++  DistanceToRightMarkingOfCenterLane = 0;
++  DistanceToRightMarkingOfRightLane  = 0;
++  DistanceToLeftObstacleInLane       = 0;
++  DistanceToCenterObstacleInLane     = 0;
++  DistanceToRightObstacleInLane      = 0;
++  Fast                               = 0;
++}
++
++float Indicators::getLaneWidth() const
++{
++  return -getML() + getMR();
++}
++
++bool Indicators::isLaneWidthValid() const
++{
++  return getLaneWidth() < MaxLaneWidth;
++}
++
++float Indicators::getLL() const
++{
++  return DistanceToLeftMarkingOfLeftLane;
++}
++
++float Indicators::getML() const
++{
++  return DistanceToLeftMarkingOfCenterLane;
++}
++
++float Indicators::getMR() const
++{
++  return DistanceToRightMarkingOfCenterLane;
++}
++
++float Indicators::getRR() const
++{
++  return DistanceToRightMarkingOfRightLane;
++}
++
++bool Indicators::isLLValid() const
++{
++  return getLL() > MaxLL;
++}
++
++bool Indicators::isMLValid() const
++{
++  return getML() > MaxML;
++}
++
++bool Indicators::isMRValid() const
++{
++  return getMR() < MaxMR;
++}
++
++bool Indicators::isRRValid() const
++{
++  return getRR() < MaxRR;
++}
++
++bool Indicators::isDistLInLaneValid() const
++{
++  return getDistLInLane() < MaxObstacleDist;
++}
++
++bool Indicators::isDistMInLaneValid() const
++{
++  return getDistMInLane() < MaxObstacleDist;
++}
++
++bool Indicators::isDistRInLaneValid() const
++{
++  return getDistRInLane() < MaxObstacleDist;
++}
++
++float Indicators::getDistLInLane() const
++{
++  return DistanceToLeftObstacleInLane;
++}
++
++float Indicators::getDistMInLane() const
++{
++  return DistanceToCenterObstacleInLane;
++}
++
++float Indicators::getDistRInLane() const
++{
++  return DistanceToRightObstacleInLane;
++}
++
++float Indicators::getL() const
++{
++  return DistanceToLeftMarking;
++}
++
++float Indicators::getM() const
++{
++  return DistanceToCenterMarking;
++}
++
++float Indicators::getR() const
++{
++  return DistanceToRightMarking;
++}
++
++bool Indicators::isLValid() const
++{
++  return getL() > MaxL;
++}
++
++bool Indicators::isRValid() const
++{
++  return getR() < MaxR;
++}
++
++bool Indicators::isMValid() const
++{
++  return (getM() > -MaxM) && (getM() < MaxM);
++}
++
++float Indicators::getDistLOnMarking() const
++{
++  return DistanceToLeftObstacle;
++}
++
++float Indicators::getDistROnMarking() const
++{
++  return DistanceToRightObstacle;
++}
++
++bool Indicators::isDistLOnMarkingValid() const
++{
++  return getDistLOnMarking() < MaxObstacleDist;
++}
++
++bool Indicators::isDistROnMarkingValid() const
++{
++  return getDistROnMarking() < MaxObstacleDist;
++}
++
++bool Indicators::isCarInLane() const
++{
++  if (isLaneWidthValid() && !isMValid())
++  {
++    return true;
++  }
++  else if (!isLaneWidthValid() && isMValid())
++  {
++    return false;
++  }
++  else if (isLaneWidthValid() && isMValid())
++  {
++    float const DiffToMaxLaneWidth = MaxLaneWidth - getLaneWidth();
++    float const DiffToMaxM         = MaxM         - std::abs(getM());
++
++    if (DiffToMaxLaneWidth > DiffToMaxM)
++    {
++      return true;
++    }
++
++    return false;
++  }
++  else if (!isLaneWidthValid() && !isMValid())
++  {
++    float const DiffToMaxLaneWidth = getLaneWidth()   - MaxLaneWidth;
++    float const DiffToMaxM         = std::abs(getM()) - MaxM;
++
++    if (DiffToMaxLaneWidth < DiffToMaxM)
++    {
++      return !isCarOffTheRoad();
++    }
++
++    return false;
++  }
++
++  return false;
++}
++
++bool Indicators::isCarOnMarking() const
++{
++  if (isLaneWidthValid() && !isMValid())
++  {
++    return false;
++  }
++  else if (!isLaneWidthValid() && isMValid())
++  {
++    return true;
++  }
++  else if (isLaneWidthValid() && isMValid())
++  {
++    float const DiffToMaxLaneWidth = MaxLaneWidth - getLaneWidth();
++    float const DiffToMaxM         = MaxM         - std::abs(getM());
++
++    if (DiffToMaxLaneWidth > DiffToMaxM)
++    {
++      return false;
++    }
++
++      return true;
++  }
++  else if (!isLaneWidthValid() && !isMValid())
++  {
++    float const DiffToMaxLaneWidth = getLaneWidth()   - MaxLaneWidth;
++    float const DiffToMaxM         = std::abs(getM()) - MaxM;
++
++    if (DiffToMaxLaneWidth < DiffToMaxM)
++    {
++      return false;
++    }
++
++    return !isCarOffTheRoad();
++  }
++
++  return false;
++}
++
++bool Indicators::isCarOffTheRoad() const
++{
++  // TODO: when is the car off the road?
++
++  if (!isLaneWidthValid() && !isMValid())
++  {
++    if (!isMLValid() && !isMRValid() && !isMValid())
++    {
++      return true;
++    }
++  }
++
++  return false;
++}
++
++bool Indicators::isLeftLane() const
++{
++  if (!isCarOffTheRoad())
++  {
++    if (isCarInLane())
++    {
++      return isLLValid();
++    }
++    else
++    {
++      return isLValid();
++    }
++  }
++
++  return false;
++}
++
++bool Indicators::isRightLane() const
++{
++  if (isCarInLane())
++  {
++    return isRRValid();
++  }
++  else
++  {
++    return isRValid();
++  }
++
++  return false;
++}
++
++int  Indicators::getNumberOfLanes() const
++{
++  int NumberOfLanes = 0;
++
++  if (isCarInLane())
++  {
++    NumberOfLanes = 1;
++  }
++  else
++  {
++    NumberOfLanes = 0;
++  }
++
++  if (isLeftLane())
++  {
++    NumberOfLanes++;
++  }
++
++  if (isRightLane())
++  {
++    NumberOfLanes++;
++  }
++
++  return NumberOfLanes;
++}
++
++void Indicators::print(std::ostream &rStream)
++{
++  rStream << "Is in lane:    " << isCarInLane()      << std::endl;
++  rStream << "Is on marking: " << isCarOnMarking()   << std::endl;
++  rStream << "Is off road:   " << isCarOffTheRoad()  << std::endl;
++  rStream << "Lanes:         " << getNumberOfLanes() << std::endl;
++  rStream << "Is left lane:  " << isLeftLane()       << std::endl;
++  rStream << "Is right lane: " << isRightLane()      << std::endl;
++
++  rStream << std::endl << "In Lane Context: " << std::endl;
++  rStream << "Dist-L " << DistanceToLeftObstacleInLane   << ", ";
++  rStream << "Dist-M " << DistanceToCenterObstacleInLane << ", ";
++  rStream << "Dist-R " << DistanceToRightObstacleInLane  << ", ";
++  rStream << "LL " << DistanceToLeftMarkingOfLeftLane    << ", ";
++  rStream << "ML " << DistanceToLeftMarkingOfCenterLane  << ", ";
++  rStream << "MR " << DistanceToRightMarkingOfCenterLane << ", ";
++  rStream << "RR " << DistanceToRightMarkingOfRightLane  << std::endl;
++
++  rStream << std::endl << "On Marking Context: " << std::endl;
++  rStream << "Dist-L " << DistanceToLeftObstacle         << ", ";
++  rStream << "Dist-M " << DistanceToRightObstacle        << ", ";
++  rStream << "L " << DistanceToLeftMarking               << ", ";
++  rStream << "M " << DistanceToCenterMarking             << ", ";
++  rStream << "R " << DistanceToRightMarking              << std::endl;
++
++  rStream << "Angle " << Angle                           << ", ";
++  rStream << "Fast " << Fast                             << std::endl;
++  rStream << std::endl;
++  rStream.flush();
++}
+diff --git a/tools/torcs/Indicators.hpp b/tools/torcs/Indicators.hpp
+new file mode 100644
+index 0000000..5298a4e
+--- /dev/null
++++ b/tools/torcs/Indicators.hpp
+@@ -0,0 +1,216 @@
++/**
++ * Indicators.hpp
++ *
++ *  Created on: Mar 25, 2017
++ *      Author: Andre Netzeband
++ */
++
++#ifndef INDICATORS_HPP_
++#define INDICATORS_HPP_
++
++#include <iostream>
++
++typedef struct Indicators
++{
++  /// @brief The angle of the host car.
++  float Angle;
++
++  /// @brief ?
++  float Fast;
++
++  // only valid if host car is driving directly on a lane marking
++  /// @brief Distance of host car to the left marking.
++  float DistanceToLeftMarking;
++
++  /// @brief Distance of the host car to the marking where the car is driving on.
++  float DistanceToCenterMarking;
++
++  /// @brief Distance of host car to the right marking.
++  float DistanceToRightMarking;
++
++  /// @brief Distance of host car to any obstacle (traffic car) on the left lane.
++  float DistanceToLeftObstacle;
++
++  /// @brief Distance of host car to any obstacle (traffic car) on the right lane.
++  float DistanceToRightObstacle;
++
++  // only valid if host car is inside a lane
++  /// @brief Distance of host car to the left marking of the left lane.
++  float DistanceToLeftMarkingOfLeftLane;
++
++  /// @brief Distance of host car to the left marking of the center lane
++  ///        (where the car is currently driving in).
++  float DistanceToLeftMarkingOfCenterLane;
++
++  /// @brief Distance of host car to the right marking of the center lane
++  ///        (where the car is currently driving in).
++  float DistanceToRightMarkingOfCenterLane;
++
++  /// @brief Distance of host car to the right marking of the right lane.
++  float DistanceToRightMarkingOfRightLane;
++
++  /// @brief Distance of host car to any obstacle (traffic car) on the left lane.
++  float DistanceToLeftObstacleInLane;
++
++  /// @brief Distance of host car to any obstacle (traffic car) on the center lane
++  ///        (where the car is currently driving in).
++  float DistanceToCenterObstacleInLane;
++
++  /// @brief Distance of host car to any obstacle (traffic car) on the right lane.
++  float DistanceToRightObstacleInLane;
++
++  /// @brief The constructor.
++  Indicators();
++
++  /// @name Constant values
++  /// @{
++
++  /// @brief The width of a single lane (in normal cases).
++  static float const LaneWidth;
++
++  /// @brief The maximum width of a single lane (to take a tolerance into account).
++  static float const MaxLaneWidth;
++
++  /// @brief The maximum valid distance for the left lane marking of left lane.
++  static float const MaxLL;
++
++  /// @brief The maximum valid distance for the left lane marking of current lane.
++  static float const MaxML;
++
++  /// @brief The maximum valid distance for the right lane marking of current lane.
++  static float const MaxMR;
++
++  /// @brief The maximum valid distance for the right lane marking of right lane.
++  static float const MaxRR;
++
++  /// @brief The maximum valid distance for the left lane marking (if car is on lane marking).
++  static float const MaxL;
++
++  /// @brief The maximum valid distance for the lane marking the car is driving on (if car is on lane marking).
++  static float const MaxM;
++
++  /// @brief The maximum valid distance for the right lane marking (if car is on lane marking).
++  static float const MaxR;
++
++  /// @brief The maximum valid distance for obstacles.
++  static float const MaxObstacleDist;
++
++  /// @}
++
++  /// @name Car is in lane
++  /// @{
++
++  /// @return Returns the measured lane width (only valid if car is in lane).
++  float getLaneWidth() const;
++
++  /// @return Returns true, if the lane width is valid.
++  bool isLaneWidthValid() const;
++
++  /// @return Returns the distance from the car to the left lane marking of the left lane, when car is in lane.
++  float getLL() const;
++
++  /// @return Returns the distance from the car to the left lane marking of the current lane, when car is in lane.
++  float getML() const;
++
++  /// @return Returns the distance from the car to the right lane marking of the current lane, when car is in lane.
++  float getMR() const;
++
++  /// @return Returns the distance from the car to the right lane marking of the right lane, when car is in lane.
++  float getRR() const;
++
++  /// @return Returns, if the distance to the left lane marking for the left lane is a valid value. If not, the left lane does not exist.
++  bool isLLValid() const;
++
++  /// @return Returns, if the distance to the left lane marking for the current lane is a valid value. If not, the car is no inside any lane.
++  bool isMLValid() const;
++
++  /// @return Returns, if the distance to the right lane marking for the current lane is a valid value. If not, the car is no inside any lane.
++  bool isMRValid() const;
++
++  /// @return Returns, if the distance to the right lane marking for the right lane is a valid value. If not, the right lane does not exist.
++  bool isRRValid() const;
++
++  /// @return Returns true, if the distance to an obstacle in the left lane has a valid value.
++  bool isDistLInLaneValid() const;
++
++  /// @return Returns true, if the distance to an obstacle in the current lane has a valid value.
++  bool isDistMInLaneValid() const;
++
++  /// @return Returns true, if the distance to an obstacle in the right lane has a valid value.
++  bool isDistRInLaneValid() const;
++
++  /// @return Returns the distance to an obstacle in the left lane.
++  float getDistLInLane() const;
++
++  /// @return Returns the distance to an obstacle in the current lane.
++  float getDistMInLane() const;
++
++  /// @return Returns the distance to an obstacle in the right lane.
++  float getDistRInLane() const;
++
++  /// @}
++
++  /// @name Car is on lane marking
++  /// @{
++
++  /// @return Returns the distance to the left lane marking.
++  float getL() const;
++
++  /// @return Returns the distance to the lane marking, the car is driving on.
++  float getM() const;
++
++  /// @return Returns the distance to the right lane marking.
++  float getR() const;
++
++  /// @return Returns, if the distance to the left lane marking is valid. If this value is false, there is no lane left to the car.
++  bool isLValid() const;
++
++  /// @return Returns, if the distance to the right lane marking is valid. If this value is false, there is no lane right to the car.
++  bool isRValid() const;
++
++  /// @return Returns, if the distance to the lane marking where the car is driving on is valid. If this value is false, there the car is not driving on a lane marking.
++  bool isMValid() const;
++
++  /// @return Returns the distance of an obstacle in the left lane.
++  float getDistLOnMarking() const;
++
++  /// @return Returns the distance of an obstacle in the right lane.
++  float getDistROnMarking() const;
++
++  /// @return Returns true, if there is an obstacle in the left lane.
++  bool isDistLOnMarkingValid() const;
++
++  /// @return Returns true, if there is an obstacle in the right lane.
++  bool isDistROnMarkingValid() const;
++
++  /// @}
++
++  /// @name Car states within lane system
++  /// @{
++
++  /// @return Returns true, if the car is driving in a lane.
++  bool isCarInLane() const;
++
++  /// @return Returns true, if the car is driving on a lane marking.
++  bool isCarOnMarking() const;
++
++  /// @return Returns true, if the car is driving off the road.
++  bool isCarOffTheRoad() const;
++
++  /// @return Returns true, if there is a left lane available.
++  bool isLeftLane() const;
++
++  /// @return Returns true, if there is a right lane available.
++  bool isRightLane() const;
++
++  /// @return Returns the number of lanes.
++  int  getNumberOfLanes() const;
++
++  /// @}
++
++  /// @brief Prints the labels on a stream.
++  void print(std::ostream &rStream);
++
++} Indicators_t;
++
++#endif /* INDICATORS_HPP_ */
+diff --git a/tools/torcs/NeuralNet.cpp b/tools/torcs/NeuralNet.cpp
+new file mode 100644
+index 0000000..8117783
+--- /dev/null
++++ b/tools/torcs/NeuralNet.cpp
+@@ -0,0 +1,299 @@
++/*
++ * NeuralNet.cpp
++ *
++ *  Created on: Mar 28, 2017
++ *      Author: netzeband
++ */
++
++#include "NeuralNet.hpp"
++
++#include <opencv2/core/core.hpp>
++#include <opencv2/highgui/highgui.hpp>
++#include <opencv2/imgproc/imgproc.hpp>
++
++using namespace caffe;
++
++CNeuralNet::CNeuralNet(std::string &rModelPath, std::string &rWeightsPath, std::string &rMeanPath, int GPUDevice)
++{
++  boost::filesystem::path ModelPath(rModelPath);
++  boost::filesystem::path WeightsPath(rWeightsPath);
++  boost::filesystem::path MeanPath(rMeanPath);
++
++  initNetwork(ModelPath, WeightsPath, MeanPath, GPUDevice);
++
++  ProcessTime = 0;
++  MaxProcessTime = 0;
++  ForwardTime = 0;
++  MaxForwardTime = 0;
++  NumberOfInferences = 0;
++}
++
++CNeuralNet::CNeuralNet(boost::filesystem::path &rModelPath, boost::filesystem::path &rWeightsPath, boost::filesystem::path &rMeanPath, int GPUDevice)
++{
++  initNetwork(rModelPath, rWeightsPath, rMeanPath, GPUDevice);
++}
++
++CNeuralNet::~CNeuralNet()
++{
++  if (pNetwork)
++  {
++    delete(pNetwork);
++  }
++}
++
++void CNeuralNet::initNetwork(boost::filesystem::path &rModelPath, boost::filesystem::path &rWeightsPath, boost::filesystem::path &rMeanPath, int GPUDevice)
++{
++  if (GPUDevice >= 0)
++  {
++    Caffe::set_mode(Caffe::GPU);
++    Caffe::SetDevice(GPUDevice);
++  }
++  else
++  {
++    Caffe::set_mode(Caffe::CPU);
++  }
++
++  pNetwork = new Net<float>(rModelPath.string(), TEST);
++
++  CHECK(pNetwork) << "Could not create a network object!";
++
++  pNetwork->CopyTrainedLayersFrom(rWeightsPath.string());
++
++  setMean(rMeanPath);
++}
++
++void CNeuralNet::setMean(boost::filesystem::path &rMeanPath)
++{
++  BlobProto MeanBinaryBlob;
++  ReadProtoFromBinaryFileOrDie(rMeanPath.c_str(), &MeanBinaryBlob);
++
++  // Convert from BlobProto to Blob<float>
++  Blob<float> MeanBlob;
++  MeanBlob.FromProto(MeanBinaryBlob);
++  CHECK_EQ(MeanBlob.channels(), 3) << "Number of channels of mean file doesn't match input layer.";
++
++  // The format of the mean file is planar 32-bit float BGR or grayscale.
++  std::vector<cv::Mat> MeanChannels;
++  float * pData = MeanBlob.mutable_cpu_data();
++
++  for (int i = 0; i < 3; ++i)
++  {
++    // Extract an individual channel.
++    cv::Mat Channel(MeanBlob.height(), MeanBlob.width(), CV_32FC1, &pData[MeanBlob.height() * MeanBlob.width() * i]);
++    MeanChannels.push_back(Channel);
++  }
++
++  cv::merge(MeanChannels, MeanImage);
++}
++
++bool CNeuralNet::processBatch(Indicators_t * pResultArray, CLabel * pLabelArray, caffe::db::LevelDBCursor * pCursor, int BatchSize)
++{
++  Timer ProcessTimer;
++  Timer ForwardTimer;
++
++  ProcessTimer.Start();
++
++  bool WasLastBatch = false;
++  CHECK(BatchSize > 0) << "Invalid Batch Size";
++  CHECK(pCursor->valid()) << "Invalid Cursor";
++
++  CImage Image[BatchSize];
++
++  for (int i = 0; i < BatchSize; i++)
++  {
++    Datum  Data;
++
++    Data.ParseFromString(pCursor->value());
++    pLabelArray[i].readFromDatum(Data);
++
++    Image[i].readFromDatum(Data);
++
++    if (i == 0)
++    {
++      resizeInput(Image[i].getImage(), BatchSize);
++    }
++
++    copyImageToInput(Image[i].getImage(), i);
++
++    pCursor->Next();
++    if (!pCursor->valid())
++    {
++      pCursor->SeekToFirst();
++      WasLastBatch = true;
++    }
++  }
++
++  ForwardTimer.Start();
++
++  pNetwork->Forward();
++
++  float Time = (ForwardTimer.MicroSeconds() / 1000000)/BatchSize;
++  ForwardTime += Time;
++  MaxForwardTime = std::max(MaxForwardTime, Time);
++
++  for (int i = 0; i < BatchSize; i++)
++  {
++    copyOutputToIndicators(&pResultArray[i], i);
++  }
++
++  Time = (ProcessTimer.MicroSeconds() / 1000000)/BatchSize;
++  ProcessTime += Time;
++  MaxProcessTime = std::max(MaxProcessTime, Time);
++
++  NumberOfInferences += BatchSize;
++
++  return WasLastBatch;
++}
++
++void CNeuralNet::process(Indicators_t * pOutput, CImage &rInputImage)
++{
++  Timer ProcessTimer;
++  Timer ForwardTimer;
++
++  ProcessTimer.Start();
++
++  resizeInput(rInputImage.getImage(), 1);
++  copyImageToInput(rInputImage.getImage(), 0);
++
++  ForwardTimer.Start();
++
++  pNetwork->Forward();
++
++  float Time = ForwardTimer.MicroSeconds() / 1000000;
++  ForwardTime += Time;
++  MaxForwardTime = std::max(MaxForwardTime, Time);
++
++  copyOutputToIndicators(pOutput, 0);
++
++  Time = ProcessTimer.MicroSeconds() / 1000000;
++  ProcessTime += Time;
++  MaxProcessTime = std::max(MaxProcessTime, Time);
++
++  NumberOfInferences++;
++}
++
++void CNeuralNet::resizeInput(IplImage * pExampleImage, int BatchSize)
++{
++  int Height = pExampleImage->height;
++  int Width  = pExampleImage->width;
++
++  // reshape input layer if necessary
++  Blob<float>* pInputLayer = pNetwork->input_blobs()[0];
++
++  if (pInputLayer->num() != BatchSize || pInputLayer->width() != Width || pInputLayer->height() != Height || pInputLayer->channels() != 3)
++  {
++    std::cout << "Reshape of input-layer to 3 channels, height " << Height << " and width " << Width << ", witch batch-size " << BatchSize << "." << std::endl;
++    pInputLayer->Reshape(BatchSize, 3, Height, Width);
++    pNetwork->Reshape();
++  }
++
++  CHECK(pInputLayer->num() == BatchSize) << "BatchSize was not changed correctly.";
++}
++
++void CNeuralNet::copyImageToInput(IplImage * pImage, int BatchElement)
++{
++  int Height = pImage->height;
++  int Width  = pImage->width;
++
++  Blob<float>* pInputLayer = pNetwork->input_blobs()[0];
++
++  CHECK(pInputLayer->num() > BatchElement) << "BatchElement Index higher than batch-size of input-layer";
++
++  int BatchOffset = BatchElement * Height * Width * pInputLayer->channels();
++
++  // create channels for the input image
++  float * pInputData = pInputLayer->mutable_cpu_data();
++  std::vector<cv::Mat> InputChannels;
++  for (int ChannelNumber = 0; ChannelNumber < pInputLayer->channels(); ChannelNumber++)
++  {
++    cv::Mat Channel(Height, Width, CV_32FC1, &pInputData[BatchOffset + ChannelNumber * Height * Width]);
++    InputChannels.push_back(Channel);
++  }
++
++  // convert image to float values
++  cv::Mat Image(pImage);
++  cv::Mat FloatImage;
++  Image.convertTo(FloatImage, CV_32FC3);
++
++  // normalize image
++  cv::Mat NormalizedImage;
++  cv::subtract(FloatImage, MeanImage, NormalizedImage);
++
++  // copy to input channel
++  cv::split(NormalizedImage, InputChannels);
++
++  CHECK(reinterpret_cast<float*>(InputChannels.at(0).data) == &pInputLayer->cpu_data()[BatchOffset]) << "Could not copy the input image to the network!";
++}
++
++void CNeuralNet::copyOutputToIndicators(Indicators_t * pOutput, int BatchElement)
++{
++  Blob<float>* pOutputLayer = pNetwork->output_blobs()[0];
++  const float* pResult = pOutputLayer->cpu_data();
++
++  CHECK(pOutputLayer->num() > BatchElement) << "BatchElement Index higher than batch-size of input-layer";
++
++  int const BatchOffset = BatchElement * 14;
++
++  pOutput->Angle                              = (pResult[BatchOffset + 0]-0.5)*1.1;
++
++  pOutput->DistanceToLeftMarking              = (pResult[BatchOffset + 1]-1.34445)*5.6249;
++  pOutput->DistanceToCenterMarking            = (pResult[BatchOffset + 2]-0.39091)*6.8752;
++  pOutput->DistanceToRightMarking             = (pResult[BatchOffset + 3]+0.34445)*5.6249;
++
++  pOutput->DistanceToLeftObstacle             = (pResult[BatchOffset + 4]-0.12)*95;
++  pOutput->DistanceToRightObstacle            = (pResult[BatchOffset + 5]-0.12)*95;
++
++  pOutput->DistanceToLeftMarkingOfLeftLane    = (pResult[BatchOffset + 6]-1.48181)*6.8752;
++  pOutput->DistanceToLeftMarkingOfCenterLane  = (pResult[BatchOffset + 7]-0.98)*6.25;
++  pOutput->DistanceToRightMarkingOfCenterLane = (pResult[BatchOffset + 8]-0.02)*6.25;
++  pOutput->DistanceToRightMarkingOfRightLane  = (pResult[BatchOffset + 9]+0.48181)*6.8752;
++
++  pOutput->DistanceToLeftObstacleInLane       = (pResult[BatchOffset + 10]-0.12)*95;
++  pOutput->DistanceToCenterObstacleInLane     = (pResult[BatchOffset + 11]-0.12)*95;
++  pOutput->DistanceToRightObstacleInLane      = (pResult[BatchOffset + 12]-0.12)*95;
++
++  if (pResult[BatchOffset + 13]>0.5)
++  {
++    pOutput->Fast = 1;
++  }
++  else
++  {
++    pOutput->Fast = 0;
++  }
++
++  /* TODO: Depending on the lane, the car is driving on, the lane marking needs to be corrected if they are invalid.
++  if (goto_lane==2 && toMarking_LL<-8) toMarking_LL=-7.5;  // correct error output
++  if (goto_lane==1 && toMarking_RR>8) toMarking_RR=7.5;  // correct error output
++  */
++
++}
++
++float CNeuralNet::getMaxProcessTime() const
++{
++  return MaxProcessTime;
++}
++
++float CNeuralNet::getMeanProcessTime() const
++{
++  return ProcessTime/NumberOfInferences;
++}
++
++float CNeuralNet::getMaxForwardTime() const
++{
++  return MaxForwardTime;
++}
++
++float CNeuralNet::getMeanForwardTime() const
++{
++  return ForwardTime/NumberOfInferences;
++}
++
++void CNeuralNet::printTimeSummery(std::ostream &rStream) const
++{
++  rStream << std::endl << "*** Time Summary for the Neural Net ***" << std::endl;
++  rStream << "Number of Inferences: " << NumberOfInferences << std::endl;
++  rStream << "Mean Process Time   : " << getMeanProcessTime() << "s" << std::endl;
++  rStream << "Mean Forward Time   : " << getMeanForwardTime() << "s" << std::endl;
++  rStream << "Max Process Time   : " << getMaxProcessTime() << "s" << std::endl;
++  rStream << "Max Forward Time   : " << getMaxForwardTime() << "s" << std::endl;
++}
+diff --git a/tools/torcs/NeuralNet.hpp b/tools/torcs/NeuralNet.hpp
+new file mode 100644
+index 0000000..4238bc2
+--- /dev/null
++++ b/tools/torcs/NeuralNet.hpp
+@@ -0,0 +1,70 @@
++/*
++ * NeuralNet.hpp
++ *
++ *  Created on: Mar 28, 2017
++ *      Author: netzeband
++ */
++
++#ifndef NEURALNET_HPP_
++#define NEURALNET_HPP_
++
++#include <boost/filesystem/path.hpp>
++
++#include <string>
++#include <iostream>
++
++#include <caffe/caffe.hpp>
++#include "caffe/util/db_leveldb.hpp"
++
++#include "Image.hpp"
++#include "Indicators.hpp"
++#include "Database.hpp"
++
++class CNeuralNet
++{
++  public:
++    /// @brief Constructor.
++    CNeuralNet(boost::filesystem::path &rModelPath, boost::filesystem::path &rWeightsPath, boost::filesystem::path &rMeanPath, int GPUDevice);
++
++    /// @brief Constructor.
++    CNeuralNet(std::string &rModelPath, std::string &rWeightsPath, std::string &rMeanPath, int GPUDevice);
++
++    /// @brief Destructor.
++    ~CNeuralNet();
++
++    /// @brief Processes an image and delivers all output indicators.
++    void process(Indicators_t * pOutput, CImage &rInputImage);
++
++    /// @brief Processes a whole batch.
++    /// @return Returns true, if the last batch was processed.
++    bool processBatch(Indicators_t * pResultArray, CLabel * pLabelArray, caffe::db::LevelDBCursor * pCursor, int BatchSize);
++
++    float getMaxProcessTime() const;
++    float getMeanProcessTime() const;
++    float getMaxForwardTime() const;
++    float getMeanForwardTime() const;
++    void printTimeSummery(std::ostream &rStream) const;
++
++  private:
++    caffe::Net<float> * pNetwork;
++    cv::Mat             MeanImage;
++    float ProcessTime;
++    float MaxProcessTime;
++    float ForwardTime;
++    float MaxForwardTime;
++    long  NumberOfInferences;
++
++    void initNetwork(boost::filesystem::path &rModelPath, boost::filesystem::path &rWeightsPath, boost::filesystem::path &rMeanPath, int GPUDevice);
++
++    void setMean(boost::filesystem::path &rMeanPath);
++
++    void copyImageToInput(IplImage * pImage, int BatchElement);
++
++    void copyOutputToIndicators(Indicators_t * pOutput, int BatchElement);
++
++    void resizeInput(IplImage * pExampleImage, int BatchSize);
++};
++
++
++
++#endif /* NEURALNET_HPP_ */
+diff --git a/tools/torcs/Semantic.cpp b/tools/torcs/Semantic.cpp
+new file mode 100644
+index 0000000..66d6359
+--- /dev/null
++++ b/tools/torcs/Semantic.cpp
+@@ -0,0 +1,643 @@
++/**
++ * Semantic.cpp
++ *
++ *  Created on: Mar 25, 2017
++ *      Author: Andre Netzeband
++ *
++ *  Attention: This is a reimplementation of the code the DeepDriving project.
++ *  See http://deepdriving.cs.princeton.edu for more details.
++ *  Thus much code comes from Chenyi Chen.
++ *
++ *  Take the original DeepDriving license into account!
++ */
++
++#include "Semantic.hpp"
++
++#include <glog/logging.h>
++#include <iostream>
++#include <algorithm>
++
++#include <opencv2/core/core.hpp>
++#include <opencv2/highgui/highgui.hpp>
++#include <opencv2/imgproc/imgproc.hpp>
++
++#include <boost/filesystem/operations.hpp>
++#include <boost/filesystem/path.hpp>
++
++#define SEMANTIC_WIDTH  320
++#define SEMANTIC_WIDTH_BIG  700
++#define SEMANTIC_HEIGHT 660
++#define SEMANTIC_WINDOW_NAME "Semantic Visualization"
++#define BACKGROUND_FILENAME "semantic_background.png"
++#define BACKGROUND_BIG_FILENAME "semantic_background_big.png"
++#define LANE1_FILENAME "semantic_1lane.png"
++#define LANE2_FILENAME "semantic_2lane.png"
++#define LANE3_FILENAME "semantic_3lane.png"
++#define ERROR_MEASUREMENT_FILENAME "semantic_error_background.png"
++
++using namespace boost::filesystem;
++
++static IplImage * loadImage(path FilePath)
++{
++  path FullPath = current_path() / FilePath;
++
++  IplImage * pImage = cvLoadImage(FullPath.c_str());
++  CHECK(pImage) << "Cannot load image " << FullPath.c_str() << std::endl;
++  return pImage;
++}
++
++CSemantic::CSemantic()
++{
++  pSemanticImage = cvCreateImage(cvSize(SEMANTIC_WIDTH, SEMANTIC_HEIGHT), IPL_DEPTH_8U, 3);
++  cvNamedWindow(SEMANTIC_WINDOW_NAME, 1);
++
++  pBackground = loadImage(BACKGROUND_FILENAME);
++  pLane1      = loadImage(LANE1_FILENAME);
++  pLane2      = loadImage(LANE2_FILENAME);
++  pLane3      = loadImage(LANE3_FILENAME);
++  pErrorMeasurementBackground = loadImage(ERROR_MEASUREMENT_FILENAME);
++
++  MarkingHead = 0;
++
++  pFrameImage = 0;
++  pAdditionalData = 0;
++  pErrorMeasurement = 0;
++
++  cvInitFont(&Font, CV_FONT_HERSHEY_PLAIN, 1, 1.5, 1, 1, 8);
++}
++
++CSemantic::~CSemantic()
++{
++  cvDestroyWindow(SEMANTIC_WINDOW_NAME);
++  cvReleaseImage(&pSemanticImage);
++
++  cvReleaseImage(&pBackground);
++  cvReleaseImage(&pLane1);
++  cvReleaseImage(&pLane2);
++  cvReleaseImage(&pLane3);
++  cvReleaseImage(&pErrorMeasurementBackground);
++}
++
++void CSemantic::setFrameImage(CImage * pFrame)
++{
++  pFrameImage = pFrame;
++
++  setupBackground();
++}
++
++void CSemantic::setAdditionalData(TorcsData_t * pData)
++{
++  pAdditionalData = pData;
++
++  setupBackground();
++}
++
++void CSemantic::setErrorMeasurement(CErrorMeasurement * pErrorMeasurementObject)
++{
++  pErrorMeasurement = pErrorMeasurementObject;
++
++  setupBackground();
++}
++
++void CSemantic::setupBackground()
++{
++  if (isBigWindow())
++  {
++    cvReleaseImage(&pSemanticImage);
++    cvReleaseImage(&pBackground);
++    pBackground = loadImage(BACKGROUND_BIG_FILENAME);
++    pSemanticImage = cvCreateImage(cvSize(SEMANTIC_WIDTH_BIG, SEMANTIC_HEIGHT), IPL_DEPTH_8U, 3);
++  }
++  else
++  {
++    cvReleaseImage(&pSemanticImage);
++    cvReleaseImage(&pBackground);
++    pBackground = loadImage(BACKGROUND_FILENAME);
++    pSemanticImage = cvCreateImage(cvSize(SEMANTIC_WIDTH, SEMANTIC_HEIGHT), IPL_DEPTH_8U, 3);
++  }
++}
++
++bool CSemantic::isBigWindow() const
++{
++  return (pFrameImage != 0) || (pAdditionalData != 0) || (pErrorMeasurement != 0);
++}
++
++void CSemantic::show(Indicators const * pGroundTruth, Indicators const * pGuessed, bool WasUpdated, int Lanes)
++{
++  Lanes = guessLanes(pGroundTruth, pGuessed, Lanes);
++  copyBackground();
++
++  int const LanePosition = getLanePosition(pGroundTruth, pGuessed, SEMANTIC_WIDTH/2);
++  addLanes(Lanes, LanePosition);
++  addLaneMarkings(Lanes, LanePosition, WasUpdated);
++  addHostCar(pGroundTruth, pGuessed, Lanes);
++  addObstacles(pGroundTruth, pGuessed, LanePosition);
++  drawFrame();
++  drawAdditionalData();
++  drawErrorMeasurement();
++  cvShowImage(SEMANTIC_WINDOW_NAME, pSemanticImage);
++}
++
++int CSemantic::guessLanes(Indicators const * pGroundTruth, Indicators const * pGuessed, int Lanes)
++{
++  if (Lanes >= 1 && Lanes <= 3)
++  {
++    return Lanes;
++  }
++  else if (pGuessed)
++  {
++    return pGuessed->getNumberOfLanes();
++  }
++  else if (pGroundTruth)
++  {
++    return pGroundTruth->getNumberOfLanes();
++  }
++
++  return 0;
++}
++
++void CSemantic::addHostCar(Indicators const * pGroundTruth, Indicators const * pGuessed, int Lanes)
++{
++  if (pGroundTruth)
++  {
++    drawHostCar(pGroundTruth, SEMANTIC_WIDTH/2, true);
++  }
++
++  if (pGuessed)
++  {
++    drawHostCar(pGuessed, SEMANTIC_WIDTH/2, false);
++  }
++}
++
++static void getCarBoxFromAngle( float * pP1x, float * pP1y,
++                                float * pP2x, float * pP2y,
++                                float * pP3x, float * pP3y,
++                                float * pP4x, float * pP4y,
++                                float Angle)
++{
++  Angle = -Angle;
++  *pP1x = -14 * cos(Angle) + 28 * sin(Angle);
++  *pP1y =  14 * sin(Angle) + 28 * cos(Angle);
++  *pP2x =  14 * cos(Angle) + 28 * sin(Angle);
++  *pP2y = -14 * sin(Angle) + 28 * cos(Angle);
++  *pP3x =  14 * cos(Angle) - 28 * sin(Angle);
++  *pP3y = -14 * sin(Angle) - 28 * cos(Angle);
++  *pP4x = -14 * cos(Angle) - 28 * sin(Angle);
++  *pP4y =  14 * sin(Angle) - 28 * cos(Angle);
++}
++
++void CSemantic::drawHostCar(Indicators const * pIndicator, float CarPosition, bool IsGroundTruth)
++{
++  float P1x, P1y, P2x, P2y, P3x, P3y, P4x, P4y;
++  getCarBoxFromAngle(&P1x, &P1y, &P2x, &P2y, &P3x, &P3y, &P4x, &P4y, pIndicator->Angle);
++
++  CvPoint Points[4];
++
++  Points[0].x = P1x + CarPosition;
++  Points[0].y = P1y + 600;
++  Points[1].x = P2x + CarPosition;
++  Points[1].y = P2y + 600;
++  Points[2].x = P3x + CarPosition;
++  Points[2].y = P3y + 600;
++  Points[3].x = P4x + CarPosition;
++  Points[3].y = P4y + 600;
++
++  if (IsGroundTruth)
++  {
++    cvFillConvexPoly(pSemanticImage, Points, 4, cvScalar(0, 0, 255));
++  }
++  else
++  {
++    int NumberOfPoints = 4;
++    CvPoint * pPoints = Points;
++    cvPolyLine(pSemanticImage, &pPoints, &NumberOfPoints, 1, 1, cvScalar(0, 255, 0), 2, CV_AA);
++  }
++}
++
++void CSemantic::addLanes(int Lanes, int LanePosition)
++{
++  IplImage * pLane = 0;
++
++  switch(Lanes)
++  {
++    case 1:
++      pLane = pLane1;
++      break;
++
++    case 2:
++      pLane = pLane2;
++      break;
++
++    case 3:
++      pLane = pLane3;
++      break;
++
++    default:
++      break;
++  }
++
++  if (pLane && LanePosition > 0)
++  {
++    int LaneTopLeftCorner = LanePosition - pLane->width / 2;
++    cv::Mat(pLane).copyTo(cv::Mat(pSemanticImage, cv::Rect(LaneTopLeftCorner, 0, pLane->width, pLane->height)));
++  }
++}
++
++void CSemantic::copyBackground()
++{
++  CHECK(pBackground);
++  CHECK(pSemanticImage);
++
++  cvCopy(pBackground, pSemanticImage);
++
++  return;
++}
++
++void CSemantic::drawFrame()
++{
++  if (pFrameImage)
++  {
++    IplImage * pFrame = pFrameImage->getImage();
++    if (pFrame)
++    {
++      cv::Mat(pFrame).copyTo(cv::Mat(pSemanticImage, cv::Rect(380, 40, pFrame->width, pFrame->height)));
++    }
++  }
++}
++
++void CSemantic::drawAdditionalData()
++{
++  if (pAdditionalData)
++  {
++    static char TextBuffer[255];
++
++    // print speed
++    cvPutText(pSemanticImage, "Speed", cvPoint(265, 65), &Font, cvScalar(255,255,255));
++    snprintf(TextBuffer, sizeof(TextBuffer), "%d km/h", int(pAdditionalData->Speed * 3.6));
++    cvPutText(pSemanticImage, TextBuffer, cvPoint(265, 85), &Font, cvScalar(255,255,255));
++
++    // print pause
++    if (!pAdditionalData->IsNotPause)
++    {
++      cvPutText(pSemanticImage, "[Pause]", cvPoint(380, 275), &Font, cvScalar(0, 0, 255));
++    }
++
++    // print control state
++    if (!pAdditionalData->IsControlling)
++    {
++      cvPutText(pSemanticImage, "[Disabled]", cvPoint(470, 275), &Font, cvScalar(0, 0, 255));
++    }
++    else
++    {
++      cvPutText(pSemanticImage, "[Enabled]", cvPoint(470, 275), &Font, cvScalar(255, 255, 255));
++    }
++
++    // print AI state
++    if (!pAdditionalData->IsAIControlled)
++    {
++      cvPutText(pSemanticImage, "[no AI]", cvPoint(580, 275), &Font, cvScalar(0, 0, 255));
++    }
++    else
++    {
++      cvPutText(pSemanticImage, "[AI]", cvPoint(580, 275), &Font, cvScalar(255, 255, 255));
++    }
++  }
++}
++
++int CSemantic::getLanePosition(Indicators const * pGroundTruth, Indicators const * pGuessed, int MidOfSemantic)
++{
++  if (pGuessed)
++  {
++    return getLanePosition(pGuessed, MidOfSemantic);
++  }
++  else if (pGroundTruth)
++  {
++    return getLanePosition(pGroundTruth, MidOfSemantic);
++  }
++
++  return MidOfSemantic;
++}
++
++int CSemantic::getLanePosition(Indicators const * pIndicator, int MidOfSemantic)
++{
++  int LanePosition = MidOfSemantic;
++
++  float StreetWidth = pIndicator->getNumberOfLanes() * pIndicator->LaneWidth;
++  float CarPosition = 0;
++
++  if (pIndicator->isCarInLane())
++  {
++    if (pIndicator->isLeftLane())
++    {
++      CarPosition = StreetWidth / 2 + pIndicator->getLL();
++    }
++    else
++    {
++      CarPosition = StreetWidth / 2 + pIndicator->getML();
++    }
++  }
++  else if (pIndicator->isCarOnMarking())
++  {
++    if (pIndicator->isLeftLane())
++    {
++      CarPosition = StreetWidth / 2 + pIndicator->getL();
++    }
++    else
++    {
++      CarPosition = StreetWidth / 2 + pIndicator->getM();
++    }
++  }
++  else if (pIndicator->isCarOffTheRoad())
++  {
++    return -100;
++  }
++
++  LanePosition += CarPosition * 12;
++
++  return LanePosition;
++}
++
++void CSemantic::addLaneMarkings(int Lanes, int LanePosition, bool WasUpdated)
++{
++  if (Lanes > 1)
++  {
++    int Pace = int(getSpeed() * 1.2);
++    if (Pace > 50)
++    {
++      Pace = 50;
++    }
++
++    if (WasUpdated)
++    {
++      MarkingHead += Pace;
++    }
++    if (MarkingHead > 0)
++    {
++      MarkingHead = MarkingHead - 110;
++    }
++    else if (MarkingHead < -110)
++    {
++      MarkingHead = MarkingHead + 110;
++    }
++
++    int MarkingStart = MarkingHead;
++    int MarkingEnd   = MarkingHead+55;
++
++    while (MarkingStart <= 660)
++    {
++      if (Lanes >= 3)
++      {
++        int LeftLanePosition  = LanePosition - 25;
++        int RightLanePosition = LanePosition + 25;
++
++        cvLine(pSemanticImage, cvPoint(LeftLanePosition,  MarkingStart), cvPoint(LeftLanePosition,  MarkingEnd), cvScalar(255,255,255), 2);
++        cvLine(pSemanticImage, cvPoint(RightLanePosition, MarkingStart), cvPoint(RightLanePosition, MarkingEnd), cvScalar(255,255,255), 2);
++      }
++      else
++      {
++        cvLine(pSemanticImage, cvPoint(LanePosition, MarkingStart), cvPoint(LanePosition, MarkingEnd), cvScalar(255,255,255), 2);
++      }
++
++      MarkingStart = MarkingStart + 110;
++      MarkingEnd   = MarkingEnd   + 110;
++    }
++  }
++}
++
++void CSemantic::addObstacles(Indicators const * pGroundTruth, Indicators const * pGuessed, int LanePosition)
++{
++  if (pGroundTruth)
++  {
++    addObstacles(pGroundTruth, LanePosition, true);
++  }
++
++  if (pGuessed)
++  {
++    addObstacles(pGuessed, LanePosition, false);
++  }
++}
++
++void CSemantic::drawObstacle(int X, int Y, bool Filled)
++{
++  if (Filled)
++  {
++    cvRectangle(pSemanticImage, cvPoint(X - 14, 600 - Y - 28), cvPoint(X + 14, 600 - Y + 28), cvScalar(0, 255, 255), -1);
++  }
++  else
++  {
++    cvRectangle(pSemanticImage, cvPoint(X - 14, 600 - Y - 28), cvPoint(X + 14, 600 - Y + 28), cvScalar(237, 99, 157), 2);
++  }
++}
++
++void CSemantic::addObstacles(Indicators const * pIndicator, int LanePosition, bool Filled)
++{
++  int Lanes = pIndicator->getNumberOfLanes();
++
++  if (pIndicator->isCarInLane())
++  {
++    if (Lanes == 3 || Lanes == 1)
++    {
++      if (pIndicator->isLeftLane() && pIndicator->isDistLInLaneValid())
++      {
++        drawObstacle(LanePosition - 45, pIndicator->getDistLInLane()*12, Filled);
++      }
++
++      if (pIndicator->isDistMInLaneValid())
++      {
++        drawObstacle(LanePosition, pIndicator->getDistMInLane()*12, Filled);
++      }
++
++      if (pIndicator->isRightLane() && pIndicator->isDistRInLaneValid())
++      {
++        drawObstacle(LanePosition + 45, pIndicator->getDistRInLane()*12, Filled);
++      }
++    }
++    else if (Lanes == 2)
++    {
++      if (pIndicator->isLeftLane())
++      {
++        if (pIndicator->isDistLInLaneValid())
++        {
++          drawObstacle(LanePosition - 22, pIndicator->getDistLInLane()*12, Filled);
++        }
++
++        if (pIndicator->isDistMInLaneValid())
++        {
++          drawObstacle(LanePosition + 22, pIndicator->getDistMInLane()*12, Filled);
++        }
++      }
++      else if (pIndicator->isRightLane())
++      {
++        if (pIndicator->isDistRInLaneValid())
++        {
++          drawObstacle(LanePosition + 22, pIndicator->getDistRInLane()*12, Filled);
++        }
++
++        if (pIndicator->isDistMInLaneValid())
++        {
++          drawObstacle(LanePosition - 22, pIndicator->getDistMInLane()*12, Filled);
++        }
++      }
++
++    }
++  }
++  else if (pIndicator->isCarOnMarking())
++  {
++    if (Lanes == 2)
++    {
++      if (pIndicator->isLeftLane() && pIndicator->isDistLOnMarkingValid())
++      {
++        drawObstacle(LanePosition - 22, pIndicator->getDistLOnMarking()*12, Filled);
++      }
++
++      if (pIndicator->isRightLane() && pIndicator->isDistROnMarkingValid())
++      {
++        drawObstacle(LanePosition + 22, pIndicator->getDistROnMarking()*12, Filled);
++      }
++    }
++    else
++    {
++      if (pIndicator->isLeftLane() && pIndicator->isDistLOnMarkingValid())
++      {
++        drawObstacle(LanePosition, pIndicator->getDistLOnMarking()*12, Filled);
++      }
++      else if (pIndicator->isRightLane() && pIndicator->isDistROnMarkingValid())
++      {
++        drawObstacle(LanePosition, pIndicator->getDistROnMarking()*12, Filled);
++      }
++    }
++  }
++}
++
++float CSemantic::getSpeed() const
++{
++  if (pAdditionalData)
++  {
++    return pAdditionalData->Speed;
++  }
++
++  return 30;
++}
++
++static void drawSingleErrorBar(IplImage * pImage, int X, int Y, int Width, int Height, float Percentage, CvScalar Color)
++{
++  if ((Width * Percentage) > 0)
++  {
++    Percentage = std::min(1.0F, Percentage);
++    cvRectangle(pImage ,cvPoint(X, Y), cvPoint(X + Width * Percentage, Y + Height), Color, -1);
++  }
++}
++
++static void drawErrorBars(IplImage * pImage, int X, int Y, float Current, float Mean, float Max)
++{
++  static int const BarWidth  = 241;
++  static int const BarHeight = 5;
++
++  drawSingleErrorBar(pImage, X, Y,             BarWidth, BarHeight, Current/Max, cvScalar(0,   0, 255));
++  drawSingleErrorBar(pImage, X, Y + BarHeight, BarWidth, BarHeight, Mean/Max,    cvScalar(255, 0, 0));
++}
++
++void CSemantic::drawErrorMeasurement()
++{
++  if (pErrorMeasurement)
++  {
++    static int const X = 330;
++    static int const Y = 290;
++
++    cv::Mat(pErrorMeasurementBackground).copyTo(cv::Mat(pSemanticImage, cv::Rect(X, Y, pErrorMeasurementBackground->width, pErrorMeasurementBackground->height)));
++
++    static int const BarX = X + 75;
++    static int const BarY = Y + 41;
++    static int const EntryHeight = 17;
++
++    int i = 0;
++
++    drawErrorBars(pSemanticImage, BarX, BarY + i * EntryHeight,
++        pErrorMeasurement->getCurrentSquaredError().DistLL,
++        pErrorMeasurement->getMeanSequaredError().DistLL,
++        1.0);
++    i++;
++
++    drawErrorBars(pSemanticImage, BarX, BarY + i * EntryHeight,
++        pErrorMeasurement->getCurrentSquaredError().DistMM,
++        pErrorMeasurement->getMeanSequaredError().DistMM,
++        1.0);
++    i++;
++
++    drawErrorBars(pSemanticImage, BarX, BarY + i * EntryHeight,
++        pErrorMeasurement->getCurrentSquaredError().DistRR,
++        pErrorMeasurement->getMeanSequaredError().DistRR,
++        1.0);
++    i++;
++
++    drawErrorBars(pSemanticImage, BarX, BarY + i * EntryHeight,
++        pErrorMeasurement->getCurrentSquaredError().LL,
++        pErrorMeasurement->getMeanSequaredError().LL,
++        1.0);
++    i++;
++
++    drawErrorBars(pSemanticImage, BarX, BarY + i * EntryHeight,
++        pErrorMeasurement->getCurrentSquaredError().ML,
++        pErrorMeasurement->getMeanSequaredError().ML,
++        1.0);
++    i++;
++
++    drawErrorBars(pSemanticImage, BarX, BarY + i * EntryHeight,
++        pErrorMeasurement->getCurrentSquaredError().MR,
++        pErrorMeasurement->getMeanSequaredError().MR,
++        1.0);
++    i++;
++
++    drawErrorBars(pSemanticImage, BarX, BarY + i * EntryHeight,
++        pErrorMeasurement->getCurrentSquaredError().RR,
++        pErrorMeasurement->getMeanSequaredError().RR,
++        1.0);
++    i++;
++    i++;
++
++    drawErrorBars(pSemanticImage, BarX, BarY + i * EntryHeight,
++        pErrorMeasurement->getCurrentSquaredError().DistL,
++        pErrorMeasurement->getMeanSequaredError().DistL,
++        1.0);
++    i++;
++
++    drawErrorBars(pSemanticImage, BarX, BarY + i * EntryHeight,
++        pErrorMeasurement->getCurrentSquaredError().DistR,
++        pErrorMeasurement->getMeanSequaredError().DistR,
++        1.0);
++    i++;
++
++    drawErrorBars(pSemanticImage, BarX, BarY + i * EntryHeight,
++        pErrorMeasurement->getCurrentSquaredError().L,
++        pErrorMeasurement->getMeanSequaredError().L,
++        1.0);
++    i++;
++
++    drawErrorBars(pSemanticImage, BarX, BarY + i * EntryHeight,
++        pErrorMeasurement->getCurrentSquaredError().M,
++        pErrorMeasurement->getMeanSequaredError().M,
++        1.0);
++    i++;
++
++    drawErrorBars(pSemanticImage, BarX, BarY + i * EntryHeight,
++        pErrorMeasurement->getCurrentSquaredError().R,
++        pErrorMeasurement->getMeanSequaredError().R,
++        1.0);
++    i++;
++    i++;
++
++    drawErrorBars(pSemanticImage, BarX, BarY + i * EntryHeight,
++        pErrorMeasurement->getCurrentSquaredError().Angle,
++        pErrorMeasurement->getMeanSequaredError().Angle,
++        1.0);
++    i++;
++    i++;
++
++    drawErrorBars(pSemanticImage, BarX, BarY + i * EntryHeight,
++        pErrorMeasurement->getCurrentSquaredError().calcLoss()*10,
++        pErrorMeasurement->getMeanSequaredError().calcLoss()*10,
++        14*4.0*0.5);
++    i++;
++
++  }
++}
+diff --git a/tools/torcs/Semantic.hpp b/tools/torcs/Semantic.hpp
+new file mode 100644
+index 0000000..1bbfbd1
+--- /dev/null
++++ b/tools/torcs/Semantic.hpp
+@@ -0,0 +1,81 @@
++/**
++ * Semantic.hpp
++ *
++ *  Created on: Mar 25, 2017
++ *      Author: Andre Netzeband
++ */
++
++#ifndef SEMANTIC_H_
++#define SEMANTIC_H_
++
++#include "Indicators.hpp"
++#include "SharedMemory.hpp"
++#include "Image.hpp"
++#include "ErrorMeasurement.hpp"
++
++#include <opencv2/core/core.hpp>
++#include <opencv2/highgui/highgui_c.h>
++
++class CSemantic
++{
++  public:
++    /// @brief Constructor.
++    CSemantic();
++
++    /// @brief Destructor.
++    ~CSemantic();
++
++    /// @brief Shows and updates the semantic window.
++    /// @param pGroundTruth Is the indicator object that contains the ground truth. Can be 0 to suppress.
++    /// @param pGuessed     Is the indicator object that contains the guessed data. Can be 0 to suppress.
++    /// @param WasUpdated   Indicated, that the values where updated.
++    void show(Indicators const * pGroundTruth, Indicators const * pGuessed, bool WasUpdated, int Lanes = 0);
++
++    /// @brief Adds a frame image to the semantic visualization. If the frame image is 0, this option is disabled.
++    /// @param pImage is the pointer to the frame image to add.
++    void setFrameImage(CImage * pImage);
++
++    /// @brief Adds additional data to the semantic visualization, like speed and driving states.
++    /// @param pAdditionalData is a pointer to the additional data to show.
++    void setAdditionalData(TorcsData_t * pAdditionalData);
++
++    /// @brief Adds error measurement data to the semantic visualization.
++    /// @param pErrorMeasurementObject Is the object that performs the error measurement.
++    void setErrorMeasurement(CErrorMeasurement * pErrorMeasurementObject);
++
++  private:
++    IplImage *            pSemanticImage;
++    IplImage *            pBackground;
++    IplImage *            pLane1;
++    IplImage *            pLane2;
++    IplImage *            pLane3;
++    IplImage *            pErrorMeasurementBackground;
++    CImage   *            pFrameImage;
++    int                   MarkingHead;
++    TorcsData_t *         pAdditionalData;
++    CvFont                Font;
++    CErrorMeasurement *   pErrorMeasurement;
++
++    bool isBigWindow() const;
++    void setupBackground();
++
++    float getSpeed() const;
++
++    int guessLanes(Indicators const * pGroundTruth, Indicators const * pGuessed, int Lanes);
++    void copyBackground();
++    void addLanes(int Lanes, int LanePosition);
++    void addHostCar(Indicators const * pGroundTruth, Indicators const * pGuessed, int Lanes);
++    void addLaneMarkings(int Lanes, int LanePosition, bool WasUpdated);
++    void addObstacles(Indicators const * pGroundTruth, Indicators const * pGuessed, int Lanes);
++    void addObstacles(Indicators const * pIndicator, int LanePosition, bool Filled);
++    void drawObstacle(int X, int Y, bool Filled);
++    void drawHostCar(Indicators const * pIndicator, float CarPosition, bool IsGroundTruth);
++    void drawFrame();
++    void drawAdditionalData();
++    void drawErrorMeasurement();
++    int  getLanePosition(Indicators const * pGroundTruth, Indicators const * pGuessed, int MidOfSemantic);
++    int  getLanePosition(Indicators const * pIndicator, int MidOfSemantic);
++};
++
++
++#endif /* SEMANTIC_H_ */
+diff --git a/tools/torcs/SharedMemory.cpp b/tools/torcs/SharedMemory.cpp
+new file mode 100644
+index 0000000..0a7c3b8
+--- /dev/null
++++ b/tools/torcs/SharedMemory.cpp
+@@ -0,0 +1,253 @@
++/**
++ * Semantic.cpp
++ *
++ *  Created on: Mar 25, 2017
++ *      Author: Andre Netzeband
++ *
++ *  Attention: This is a reimplementation of the code the DeepDriving project.
++ *  See http://deepdriving.cs.princeton.edu for more details.
++ *  Thus much code comes from Chenyi Chen.
++ *
++ *  Take the original DeepDriving license into account!
++ */
++
++#include "SharedMemory.hpp"
++
++#include <glog/logging.h>
++
++#include <iostream>
++#include <unistd.h>
++#include <stdlib.h>
++#include <stdio.h>
++#include <sys/shm.h>
++#include <cstring>
++
++#define TORCS_IMAGE_WIDTH   640
++#define TORCS_IMAGE_HEIGHT  480
++#define RESIZE_IMAGE_WIDTH  280
++#define RESIZE_IMAGE_HEIGHT 210
++
++
++typedef struct
++{
++    int written;  //a label, if 1: available to read, if 0: available to write
++    uint8_t data[TORCS_IMAGE_WIDTH*TORCS_IMAGE_HEIGHT*3];  // image data field
++    int control;
++    int pause;
++    double fast;
++
++    double dist_L;
++    double dist_R;
++
++    double toMarking_L;
++    double toMarking_M;
++    double toMarking_R;
++
++    double dist_LL;
++    double dist_MM;
++    double dist_RR;
++
++    double toMarking_LL;
++    double toMarking_ML;
++    double toMarking_MR;
++    double toMarking_RR;
++
++    double toMiddle;
++    double angle;
++    double speed;
++
++    double steerCmd;
++    double accelCmd;
++    double brakeCmd;
++} SharedMemoryLayout_t;
++
++CSharedMemory::CSharedMemory():
++    pMemory(0),
++    SharedMemoryID(-1),
++    IsDataUpdated(false)
++{
++  attach();
++  initMemory();
++}
++
++CSharedMemory::~CSharedMemory()
++{
++  detach();
++}
++
++void CSharedMemory::attach()
++{
++  SharedMemoryID = shmget((key_t)4567, sizeof(SharedMemoryLayout_t), 0666 | IPC_CREAT);
++
++  if(SharedMemoryID == -1)
++  {
++    std::cerr << "ERROR: Cannot attach to shared memory from TORCS (ID is invalid)!" << std::endl;
++  }
++  else
++  {
++    pMemory = shmat(SharedMemoryID, 0, 0);
++    if(pMemory == ((void*)-1))
++    {
++      pMemory = 0;
++      std::cerr << "ERROR: Cannot attach to shared memory from TORCS (Memory address is invalid)!" << std::endl;
++    }
++    else
++    {
++      std::cout << std::endl << "********** Memory sharing started, attached at " << pMemory << " **********" << std::endl;
++    }
++  }
++}
++
++void CSharedMemory::detach()
++{
++  if (pMemory)
++  {
++    if(shmdt(pMemory) == -1)
++    {
++      std::cerr << "ERROR: Cannot detach from shared memory!" << std::endl;
++    }
++    else
++    {
++      if(shmctl(SharedMemoryID, IPC_RMID, 0) == -1)
++      {
++        std::cerr << "ERROR: Cannot detach from shared memory!" << std::endl;
++      }
++      else
++      {
++        std::cout << std::endl << "********** Memory sharing stopped. Good Bye! **********" << std::endl;
++      }
++    }
++  }
++}
++
++void CSharedMemory::initMemory()
++{
++  if (pMemory)
++  {
++    SharedMemoryLayout_t * const pShared = (SharedMemoryLayout_t *)pMemory;
++
++    memset(pShared->data, 0, TORCS_IMAGE_WIDTH * TORCS_IMAGE_HEIGHT * 3);
++
++    pShared->written = 0;
++    pShared->control = 0;
++    pShared->pause = 0;
++    pShared->fast = 0.0;
++
++    pShared->dist_L = 0.0;
++    pShared->dist_R = 0.0;
++
++    pShared->toMarking_L = 0.0;
++    pShared->toMarking_M = 0.0;
++    pShared->toMarking_R = 0.0;
++
++    pShared->dist_LL = 0.0;
++    pShared->dist_MM = 0.0;
++    pShared->dist_RR = 0.0;
++
++    pShared->toMarking_LL = 0.0;
++    pShared->toMarking_ML = 0.0;
++    pShared->toMarking_MR = 0.0;
++    pShared->toMarking_RR = 0.0;
++
++    pShared->toMiddle = 0.0;
++    pShared->angle = 0.0;
++    pShared->speed = 0.0;
++
++    pShared->steerCmd = 0.0;
++    pShared->accelCmd = 0.0;
++    pShared->brakeCmd = 0.0;
++
++    Indicators.Angle = 0;
++    Indicators.Fast  = 0;
++
++    Indicators.DistanceToLeftObstacle  = Indicators.MaxObstacleDist;
++    Indicators.DistanceToRightObstacle = Indicators.MaxObstacleDist;
++
++    Indicators.DistanceToLeftMarking   = Indicators.MaxL;
++    Indicators.DistanceToCenterMarking = Indicators.MaxM;
++    Indicators.DistanceToRightMarking  = Indicators.MaxR;
++
++    Indicators.DistanceToLeftObstacleInLane   = Indicators.MaxObstacleDist;
++    Indicators.DistanceToCenterObstacleInLane = Indicators.MaxObstacleDist;
++    Indicators.DistanceToRightObstacleInLane  = Indicators.MaxObstacleDist;
++
++    Indicators.DistanceToLeftMarkingOfLeftLane    =  Indicators.MaxLL;
++    Indicators.DistanceToLeftMarkingOfCenterLane  = -Indicators.LaneWidth/2;
++    Indicators.DistanceToRightMarkingOfCenterLane =  Indicators.LaneWidth/2;
++    Indicators.DistanceToRightMarkingOfRightLane  =  Indicators.MaxRR;
++
++    Image.setNoVideo(RESIZE_IMAGE_WIDTH, RESIZE_IMAGE_HEIGHT);
++
++    TorcsData.IsNotPause      = 0;
++    TorcsData.IsControlling   = 0;
++    TorcsData.Accelerating    = 0;
++    TorcsData.Breaking        = 0;
++    TorcsData.Steering        = 0;
++    TorcsData.Speed           = 0;
++    TorcsData.IsAIControlled  = true;
++    TorcsData.ShowGroundTruth = true;
++  }
++}
++
++void CSharedMemory::read()
++{
++  SharedMemoryLayout_t * const pShared = (SharedMemoryLayout_t *)pMemory;
++
++  if (pShared->written)
++  {
++    Indicators.Angle = pShared->angle;
++    Indicators.Fast  = int(pShared->fast);
++
++    Indicators.DistanceToLeftObstacle  = pShared->dist_L;
++    Indicators.DistanceToRightObstacle = pShared->dist_R;
++
++    Indicators.DistanceToLeftMarking   = pShared->toMarking_L;
++    Indicators.DistanceToCenterMarking = pShared->toMarking_M;
++    Indicators.DistanceToRightMarking  = pShared->toMarking_R;
++
++    Indicators.DistanceToLeftObstacleInLane   = pShared->dist_LL;
++    Indicators.DistanceToCenterObstacleInLane = pShared->dist_MM;
++    Indicators.DistanceToRightObstacleInLane  = pShared->dist_RR;
++
++    Indicators.DistanceToLeftMarkingOfLeftLane    = pShared->toMarking_LL;
++    Indicators.DistanceToLeftMarkingOfCenterLane  = pShared->toMarking_ML;
++    Indicators.DistanceToRightMarkingOfCenterLane = pShared->toMarking_MR;
++    Indicators.DistanceToRightMarkingOfRightLane  = pShared->toMarking_RR;
++
++    Image.readFromMemory(pShared->data, TORCS_IMAGE_WIDTH, TORCS_IMAGE_HEIGHT, RESIZE_IMAGE_WIDTH, RESIZE_IMAGE_HEIGHT);
++
++    TorcsData.IsNotPause    = pShared->pause;
++    TorcsData.IsControlling = pShared->control;
++    TorcsData.Accelerating  = pShared->accelCmd;
++    TorcsData.Breaking      = pShared->brakeCmd;
++    TorcsData.Steering      = pShared->steerCmd;
++    TorcsData.Speed         = pShared->speed;
++
++    IsDataUpdated = true;
++  }
++}
++
++bool CSharedMemory::isDataUpdated()
++{
++  return IsDataUpdated;
++}
++
++void CSharedMemory::write()
++{
++  SharedMemoryLayout_t * const pShared = (SharedMemoryLayout_t *)pMemory;
++
++  pShared->pause    = TorcsData.IsNotPause ? 1 : 0;
++  pShared->control  = TorcsData.IsControlling ? 1 : 0;
++  pShared->accelCmd = TorcsData.Accelerating;
++  pShared->brakeCmd = TorcsData.Breaking;
++  pShared->steerCmd = TorcsData.Steering;
++
++  //printf("Pause %d, Control %d\n", pShared->pause, pShared->control);
++
++  if (IsDataUpdated)
++  {
++    pShared->written=0;
++
++    IsDataUpdated = false;
++  }
++}
+diff --git a/tools/torcs/SharedMemory.hpp b/tools/torcs/SharedMemory.hpp
+new file mode 100644
+index 0000000..a2da12b
+--- /dev/null
++++ b/tools/torcs/SharedMemory.hpp
+@@ -0,0 +1,63 @@
++/**
++ * SharedMemory.hpp
++ *
++ *  Created on: Mar 26, 2017
++ *      Author: Andre Netzeband
++ */
++
++#ifndef SHAREDMEMORY_HPP_
++#define SHAREDMEMORY_HPP_
++
++#include "Indicators.hpp"
++#include "Image.hpp"
++
++typedef struct
++{
++  bool   IsControlling;
++  bool   IsNotPause;
++  double Speed;
++  double Steering;
++  double Accelerating;
++  double Breaking;
++  bool   IsAIControlled;
++  bool   ShowGroundTruth;
++} TorcsData_t;
++
++class CSharedMemory
++{
++  public:
++    /// @brief Constructor.
++    CSharedMemory();
++
++    /// @brief Destructor.
++    ~CSharedMemory();
++
++    /// @brief Reads the shared memory if possible.
++    void read();
++
++    /// @return Returns true, if new data was read.
++    bool isDataUpdated();
++
++    /// @brief Writes the shared memory.
++    void write();
++
++    /// @brief The indicators from the shared memory.
++    Indicators_t Indicators;
++
++    /// @brief The other data which comes from torcs.
++    TorcsData_t TorcsData;
++
++    /// @brief The image comming from torcs.
++    CImage Image;
++
++  private:
++    void * pMemory;
++    int    SharedMemoryID;
++    bool   IsDataUpdated;
++
++    void attach();
++    void detach();
++    void initMemory();
++};
++
++#endif /* SHAREDMEMORY_HPP_ */
+diff --git a/tools/torcs_run.cpp b/tools/torcs_run.cpp
+new file mode 100644
+index 0000000..8acfd4a
+--- /dev/null
++++ b/tools/torcs_run.cpp
+@@ -0,0 +1,266 @@
++/*
++ * torcs_visualize_database.cpp
++ *
++ *  Created on: Mar 24, 2017
++ *      Author: Andre Netzeband
++ *
++ *  This file was initially creates by Chenyi Chen for the DeepDriving project.
++ *  See http://deepdriving.cs.princeton.edu for more details.
++ *
++ *  This implementations uses the latest caffe implementation (1.0.0-rc5) instead of the old
++ *  one used by Chenyi Chen in 2014.
++ */
++
++////////////////////////////////////////////////
++//
++//  Drives the host car in TORCS.
++//
++////////////////////////////////////////////////
++
++#include <glog/logging.h>
++
++#include "caffe/caffe.hpp"
++#include "caffe/util/db_leveldb.hpp"
++
++#include <opencv2/core/core.hpp>
++#include <opencv2/imgproc/imgproc.hpp>
++#include <opencv2/highgui/highgui.hpp>
++#include <opencv2/highgui/highgui_c.h>
++
++#include "torcs/Arguments.hpp"
++#include "torcs/SharedMemory.hpp"
++#include "torcs/Semantic.hpp"
++#include "torcs/DriveController.hpp"
++#include "torcs/NeuralNet.hpp"
++
++#define ImageWidth  280
++#define ImageHeight 210
++
++using namespace caffe;
++using std::string;
++
++int run(string ModelPath, string WeightsPath, string MeanPath, int Lanes, int GPUDevice);
++
++int main(int argc, char** argv)
++{
++  ::google::InitGoogleLogging(argv[0]);
++
++  string const ModelPath = getArgument(argc, argv, "--model");
++
++  if (ModelPath.empty())
++  {
++    std::cout << "Please define a path to the model description." << std::endl;
++    std::cout << "Example: " << std::endl << std::endl;
++    std::cout << argv[0] << " --model pre_trained/modelfile.prototxt --weights pre_trained/weightsfile.binaryproto --mean pre_trained/meanfile.binaryproto --lanes 3" << std::endl << std::endl;
++    return -1;
++  }
++
++  string const WeightsPath = getArgument(argc, argv, "--weights");
++
++  if (WeightsPath.empty())
++  {
++    std::cout << "Please define a path to the model weights." << std::endl;
++    std::cout << "Example: " << std::endl << std::endl;
++    std::cout << argv[0] << " --model pre_trained/modelfile.prototxt --weights pre_trained/weightsfile.binaryproto --mean pre_trained/meanfile.binaryproto --lanes 3" << std::endl << std::endl;
++    return -1;
++  }
++
++  string const MeanPath = getArgument(argc, argv, "--mean");
++
++  if (MeanPath.empty())
++  {
++    std::cout << "Please define a path to the mean file." << std::endl;
++    std::cout << "Example: " << std::endl << std::endl;
++    std::cout << argv[0] << " --model pre_trained/modelfile.prototxt --weights pre_trained/weightsfile.binaryproto --mean pre_trained/meanfile.binaryproto --lanes 3" << std::endl << std::endl;
++    return -1;
++  }
++
++  string const LaneString   = getArgument(argc, argv, "--lanes");
++
++  if (LaneString.empty())
++  {
++    std::cout << "Please specify the number of lanes (from 1 to 3)." << std::endl;
++    std::cout << "Example: " << std::endl << std::endl;
++    std::cout << argv[0] << " --data-path pre_trained/TORCS_Training_1F --lanes 3" << std::endl << std::endl;
++    return -1;
++  }
++
++  int Lanes = atoi(LaneString.c_str());
++
++  if (Lanes < 1 || Lanes > 3)
++  {
++    std::cout << "Please specify the number of lanes (from 1 to 3)." << std::endl;
++    std::cout << "Example: " << std::endl << std::endl;
++    std::cout << argv[0] << " --data-path pre_trained/TORCS_Training_1F --lanes 3" << std::endl << std::endl;
++    return -1;
++  }
++
++  int GPUDevice = -1;
++  string const GPUString   = getArgument(argc, argv, "--gpu");
++
++  if (!GPUString.empty())
++  {
++    GPUDevice = atoi(GPUString.c_str());
++
++    if (GPUDevice < 0)
++    {
++      GPUDevice = -1;
++    }
++  }
++  else
++  {
++    std::cout << "WARNING: GPU usage is disabled. Enable it with --gpu <DeviceNumber> or disable it explicitly with --gpu -1." << std::endl;
++  }
++
++  return run(ModelPath, WeightsPath, MeanPath, Lanes, GPUDevice);
++}
++
++bool processKeys(TorcsData_t &rData);
++
++int run(string ModelPath, string WeightsPath, string MeanPath, int Lanes, int GPUDevice)
++{
++  CSharedMemory     TorcsMemory;
++  CSemantic         Semantic;
++  CDriveController  DriveController;
++  CNeuralNet        NeuralNet(ModelPath, WeightsPath, MeanPath, GPUDevice);
++  CErrorMeasurement ErrorMeas;
++
++  Semantic.setFrameImage(&TorcsMemory.Image);
++  Semantic.setAdditionalData(&TorcsMemory.TorcsData);
++  Semantic.setErrorMeasurement(&ErrorMeas);
++  Semantic.show(0, 0, false);
++
++  Indicators_t * pGroundTruth = &TorcsMemory.Indicators;
++  Indicators_t * pEstimatedIndicators = 0;
++  Indicators_t EstimatedIndicators;
++
++  bool IsEnd = false;
++  while(!IsEnd)
++  {
++    TorcsMemory.read();
++
++    if (TorcsMemory.TorcsData.ShowGroundTruth)
++    {
++      pGroundTruth = &TorcsMemory.Indicators;
++    }
++    else
++    {
++      pGroundTruth = 0;
++    }
++
++    if (TorcsMemory.isDataUpdated())
++    {
++      pEstimatedIndicators = &EstimatedIndicators;
++      NeuralNet.process(pEstimatedIndicators, TorcsMemory.Image);
++      ErrorMeas.measure(&TorcsMemory.Indicators, pEstimatedIndicators);
++
++      if (TorcsMemory.TorcsData.IsAIControlled)
++      {
++        DriveController.control(*pEstimatedIndicators, TorcsMemory.TorcsData, Lanes);
++      }
++      else
++      {
++        DriveController.control(TorcsMemory.Indicators, TorcsMemory.TorcsData, Lanes);
++      }
++
++      Semantic.show(pGroundTruth, pEstimatedIndicators, true);
++
++      std::cout << std::endl << "Ground-Truth: " << std::endl;
++      std::cout << "============= " << std::endl;
++      TorcsMemory.Indicators.print(std::cout);
++      std::cout << std::endl << "Estimated: " << std::endl;
++      std::cout << "============= " << std::endl;
++      EstimatedIndicators.print(std::cout);
++    }
++    else
++    {
++      Semantic.show(pGroundTruth, pEstimatedIndicators, false);
++    }
++
++    IsEnd = processKeys(TorcsMemory.TorcsData);
++    TorcsMemory.write();
++  }
++
++  ErrorMeas.print(std::cout);
++  NeuralNet.printTimeSummery(std::cout);
++
++  return 0;
++}
++
++bool processKeys(TorcsData_t &rData)
++{
++  static const char PauseKey     = 'p';
++  static const char ControlKey   = 'c';
++  static const char AIKey        = 'a';
++  static const char VisualKey    = 'v';
++  static const char ForwardKey   = 82;
++  static const char BackwardKey  = 84;
++  static const char LeftKey      = 81;
++  static const char RightKey     = 83;
++  static const char EscKey       = 27;
++  static const int KeyTime = 1;
++  static int KeyCounter = 0;
++
++  char Key = cvWaitKey(KeyTime);
++
++  // Escape Key
++  if (Key == EscKey)
++  {
++    return true;
++  }
++
++  KeyCounter++;
++
++  if (Key == PauseKey)
++  {
++    rData.IsNotPause = !rData.IsNotPause;
++  }
++
++  if (Key == ControlKey)
++  {
++    rData.IsControlling = !rData.IsControlling;
++  }
++
++  if (Key == AIKey)
++  {
++    rData.IsAIControlled = !rData.IsAIControlled;
++  }
++
++  if (Key == VisualKey)
++  {
++    rData.ShowGroundTruth = !rData.ShowGroundTruth;
++  }
++
++  if (Key == ForwardKey)
++  {
++    rData.Accelerating = 1.0;
++    rData.Breaking = 0.0;
++  }
++
++  if (Key == BackwardKey)
++  {
++    rData.Accelerating = 0.0;
++    rData.Breaking = 0.8;
++  }
++
++  if (Key == LeftKey)
++  {
++    rData.Steering = 0.5;
++    KeyCounter = 0;
++  }
++
++  if (Key == RightKey)
++  {
++    rData.Steering = -0.5;
++    KeyCounter = 0;
++  }
++
++  if (KeyCounter > 20)
++  {
++    // TODO: manual = 0
++  }
++
++  return false;
++}
++
++
+diff --git a/tools/torcs_verify.cpp b/tools/torcs_verify.cpp
+new file mode 100644
+index 0000000..547266b
+--- /dev/null
++++ b/tools/torcs_verify.cpp
+@@ -0,0 +1,234 @@
++/*
++ * torcs_visualize_database.cpp
++ *
++ *  Created on: Mar 24, 2017
++ *      Author: Andre Netzeband
++ *
++ *  This file was initially creates by Chenyi Chen for the DeepDriving project.
++ *  See http://deepdriving.cs.princeton.edu for more details.
++ *
++ *  This implementations uses the latest caffe implementation (1.0.0-rc5) instead of the old
++ *  one used by Chenyi Chen in 2014.
++ */
++
++////////////////////////////////////////////////
++//
++//  Verifies the network model with a recorded
++//  data set and outputs the error.
++//
++////////////////////////////////////////////////
++
++#include <glog/logging.h>
++
++#include "caffe/caffe.hpp"
++#include "caffe/util/db_leveldb.hpp"
++
++#include <opencv2/core/core.hpp>
++#include <opencv2/imgproc/imgproc.hpp>
++#include <opencv2/highgui/highgui.hpp>
++#include <opencv2/highgui/highgui_c.h>
++
++#include "torcs/Arguments.hpp"
++#include "torcs/Semantic.hpp"
++#include "torcs/NeuralNet.hpp"
++#include "torcs/Database.hpp"
++
++#define ImageWidth  280
++#define ImageHeight 210
++
++using namespace caffe;
++using std::string;
++
++int verify(string DataPath, string ModelPath, string WeightsPath, string MeanPath, int GPUDevice);
++
++int main(int argc, char** argv)
++{
++  ::google::InitGoogleLogging(argv[0]);
++
++  string const DataPath = getArgument(argc, argv, "--data");
++
++  if (DataPath.empty())
++  {
++    std::cout << "Please define a path to the laveldb data." << std::endl;
++    std::cout << "Example: " << std::endl << std::endl;
++    std::cout << argv[0] << " --data pre_trained/TORCS_Training_1F --model pre_trained/modelfile.prototxt --weights pre_trained/weightsfile.binaryproto --mean pre_trained/meanfile.binaryproto" << std::endl << std::endl;
++    return -1;
++  }
++
++  string const ModelPath = getArgument(argc, argv, "--model");
++
++  if (ModelPath.empty())
++  {
++    std::cout << "Please define a path to the model description." << std::endl;
++    std::cout << "Example: " << std::endl << std::endl;
++    std::cout << argv[0] << " --data pre_trained/TORCS_Training_1F --model pre_trained/modelfile.prototxt --weights pre_trained/weightsfile.binaryproto --mean pre_trained/meanfile.binaryproto" << std::endl << std::endl;
++    return -1;
++  }
++
++  string const WeightsPath = getArgument(argc, argv, "--weights");
++
++  if (WeightsPath.empty())
++  {
++    std::cout << "Please define a path to the model weights." << std::endl;
++    std::cout << "Example: " << std::endl << std::endl;
++    std::cout << argv[0] << " --data pre_trained/TORCS_Training_1F --model pre_trained/modelfile.prototxt --weights pre_trained/weightsfile.binaryproto --mean pre_trained/meanfile.binaryproto" << std::endl << std::endl;
++    return -1;
++  }
++
++  string const MeanPath = getArgument(argc, argv, "--mean");
++
++  if (MeanPath.empty())
++  {
++    std::cout << "Please define a path to the mean file." << std::endl;
++    std::cout << "Example: " << std::endl << std::endl;
++    std::cout << argv[0] << " --data pre_trained/TORCS_Training_1F --model pre_trained/modelfile.prototxt --weights pre_trained/weightsfile.binaryproto --mean pre_trained/meanfile.binaryproto" << std::endl << std::endl;
++    return -1;
++  }
++
++  int GPUDevice = -1;
++  string const GPUString   = getArgument(argc, argv, "--gpu");
++
++  if (!GPUString.empty())
++  {
++    GPUDevice = atoi(GPUString.c_str());
++
++    if (GPUDevice < 0)
++    {
++      GPUDevice = -1;
++    }
++  }
++  else
++  {
++    std::cout << "WARNING: GPU usage is disabled. Enable it with --gpu <DeviceNumber> or disable it explicitly with --gpu -1." << std::endl;
++  }
++
++  return verify(DataPath, ModelPath, WeightsPath, MeanPath, GPUDevice);
++}
++
++bool processKeys();
++
++int verify(string DataPath, string ModelPath, string WeightsPath, string MeanPath, int GPUDevice)
++{
++  CImage            Image;
++  CLabel            Label;
++  CSemantic         Semantic;
++  CNeuralNet        NeuralNet(ModelPath, WeightsPath, MeanPath, GPUDevice);
++  CErrorMeasurement ErrorMeas;
++
++  Semantic.setFrameImage(&Image);
++  Semantic.setErrorMeasurement(&ErrorMeas);
++  Semantic.show(0, 0, false);
++
++  Indicators_t EstimatedIndicators;
++
++  db::LevelDB Database;
++  Database.Open(DataPath, db::READ);
++
++  db::LevelDBCursor * pCursor = Database.NewCursor();
++  CHECK(pCursor)          << "Cannot generate cursor from database \'" << DataPath << "\'.";
++  CHECK(pCursor->valid()) << "Database \'" << DataPath << "\' is empty.";
++
++  int FrameNumber = 0;
++  bool IsEnd = false;
++  while(pCursor->valid() && !IsEnd)
++  {
++    FrameNumber++;
++    std::cout << "Frame: " << FrameNumber << std::endl;
++    std::cout.flush();
++
++    Datum Data;
++    Data.ParseFromString(pCursor->value());
++
++    Label.readFromDatum(Data);
++    Image.readFromDatum(Data);
++
++    NeuralNet.process(&EstimatedIndicators, Image);
++    ErrorMeas.measure(&Label.Indicators, &EstimatedIndicators);
++
++    Semantic.show(&Label.Indicators, &EstimatedIndicators, true);
++
++    std::cout << std::endl << "Ground-Truth: " << std::endl;
++    std::cout << "============= " << std::endl;
++    Label.Indicators.print(std::cout);
++
++    std::cout << std::endl << "Estimated: " << std::endl;
++    std::cout << "============= " << std::endl;
++    EstimatedIndicators.print(std::cout);
++
++    pCursor->Next();
++
++    IsEnd = processKeys();
++  }
++
++  ErrorMeas.print(std::cout);
++  NeuralNet.printTimeSummery(std::cout);
++
++  return 0;
++}
++
++
++bool processKeys()
++{
++  static bool IsPause = true;
++  static const char PauseKey = 'p';
++  static const char NextKey  = 'n';
++  static const char EscKey   = 27;
++  static const char PlusKey  = '+';
++  static const char MinusKey = '-';
++  static const int WaitStep = 100;
++  static int WaitTime = 500;
++  static int KeyTime = 20;
++
++
++  bool IsNext = false;
++  int Time = WaitTime;
++
++  while(!IsNext)
++  {
++    char Key = cvWaitKey(KeyTime);
++
++    if (IsPause)
++    {
++      IsNext = false;
++    }
++    else
++    {
++      Time -= KeyTime;
++      IsNext = Time <= 0;
++    }
++
++    // Escape Key
++    if (Key == EscKey)
++    {
++      return true;
++    }
++
++    if (Key == PauseKey)
++    {
++      IsPause = !IsPause;
++    }
++
++    if (Key == PlusKey)
++    {
++      Time -= WaitTime;
++      WaitTime = std::max(0, WaitTime - WaitStep);
++      Time += WaitTime;
++    }
++
++    if (Key == MinusKey)
++    {
++      Time -= WaitTime;
++      WaitTime = std::max(0, WaitTime + WaitStep);
++      Time += WaitTime;
++    }
++
++    if (Key == NextKey)
++    {
++      IsNext = true;
++    }
++  }
++
++  return false;
++}
++
++
+diff --git a/tools/torcs_verify_fast.cpp b/tools/torcs_verify_fast.cpp
+new file mode 100644
+index 0000000..9eaca3c
+--- /dev/null
++++ b/tools/torcs_verify_fast.cpp
+@@ -0,0 +1,156 @@
++/*
++ * torcs_visualize_database.cpp
++ *
++ *  Created on: Mar 24, 2017
++ *      Author: Andre Netzeband
++ *
++ *  This file was initially creates by Chenyi Chen for the DeepDriving project.
++ *  See http://deepdriving.cs.princeton.edu for more details.
++ *
++ *  This implementations uses the latest caffe implementation (1.0.0-rc5) instead of the old
++ *  one used by Chenyi Chen in 2014.
++ */
++
++////////////////////////////////////////////////
++//
++//  Verifies the network model with a recorded
++//  data set and outputs the error.
++//
++////////////////////////////////////////////////
++
++#include <glog/logging.h>
++
++#include "caffe/caffe.hpp"
++#include "caffe/util/db_leveldb.hpp"
++
++#include <opencv2/core/core.hpp>
++#include <opencv2/imgproc/imgproc.hpp>
++#include <opencv2/highgui/highgui.hpp>
++#include <opencv2/highgui/highgui_c.h>
++
++#include "torcs/Arguments.hpp"
++#include "torcs/Semantic.hpp"
++#include "torcs/NeuralNet.hpp"
++#include "torcs/Database.hpp"
++
++#define ImageWidth  280
++#define ImageHeight 210
++
++using namespace caffe;
++using std::string;
++
++int verify(string DataPath, string ModelPath, string WeightsPath, string MeanPath, int GPUDevice);
++
++int main(int argc, char** argv)
++{
++  ::google::InitGoogleLogging(argv[0]);
++
++  string const DataPath = getArgument(argc, argv, "--data");
++
++  if (DataPath.empty())
++  {
++    std::cout << "Please define a path to the laveldb data." << std::endl;
++    std::cout << "Example: " << std::endl << std::endl;
++    std::cout << argv[0] << " --data pre_trained/TORCS_Training_1F --model pre_trained/modelfile.prototxt --weights pre_trained/weightsfile.binaryproto --mean pre_trained/meanfile.binaryproto" << std::endl << std::endl;
++    return -1;
++  }
++
++  string const ModelPath = getArgument(argc, argv, "--model");
++
++  if (ModelPath.empty())
++  {
++    std::cout << "Please define a path to the model description." << std::endl;
++    std::cout << "Example: " << std::endl << std::endl;
++    std::cout << argv[0] << " --data pre_trained/TORCS_Training_1F --model pre_trained/modelfile.prototxt --weights pre_trained/weightsfile.binaryproto --mean pre_trained/meanfile.binaryproto" << std::endl << std::endl;
++    return -1;
++  }
++
++  string const WeightsPath = getArgument(argc, argv, "--weights");
++
++  if (WeightsPath.empty())
++  {
++    std::cout << "Please define a path to the model weights." << std::endl;
++    std::cout << "Example: " << std::endl << std::endl;
++    std::cout << argv[0] << " --data pre_trained/TORCS_Training_1F --model pre_trained/modelfile.prototxt --weights pre_trained/weightsfile.binaryproto --mean pre_trained/meanfile.binaryproto" << std::endl << std::endl;
++    return -1;
++  }
++
++  string const MeanPath = getArgument(argc, argv, "--mean");
++
++  if (MeanPath.empty())
++  {
++    std::cout << "Please define a path to the mean file." << std::endl;
++    std::cout << "Example: " << std::endl << std::endl;
++    std::cout << argv[0] << " --data pre_trained/TORCS_Training_1F --model pre_trained/modelfile.prototxt --weights pre_trained/weightsfile.binaryproto --mean pre_trained/meanfile.binaryproto" << std::endl << std::endl;
++    return -1;
++  }
++
++  int GPUDevice = -1;
++  string const GPUString   = getArgument(argc, argv, "--gpu");
++
++  if (!GPUString.empty())
++  {
++    GPUDevice = atoi(GPUString.c_str());
++
++    if (GPUDevice < 0)
++    {
++      GPUDevice = -1;
++    }
++  }
++  else
++  {
++    std::cout << "WARNING: GPU usage is disabled. Enable it with --gpu <DeviceNumber> or disable it explicitly with --gpu -1." << std::endl;
++  }
++
++  return verify(DataPath, ModelPath, WeightsPath, MeanPath, GPUDevice);
++}
++
++int verify(string DataPath, string ModelPath, string WeightsPath, string MeanPath, int GPUDevice)
++{
++  int const BatchSize = 64;
++  int const NumberUntilOutput = 1000;
++
++  CLabel            Label[BatchSize];
++  Indicators_t      EstimatedIndicators[BatchSize];
++  CNeuralNet        NeuralNet(ModelPath, WeightsPath, MeanPath, GPUDevice);
++
++  CErrorMeasurement ErrorMeas;
++
++  db::LevelDB Database;
++  Database.Open(DataPath, db::READ);
++
++  db::LevelDBCursor * pCursor = Database.NewCursor();
++  CHECK(pCursor)          << "Cannot generate cursor from database \'" << DataPath << "\'.";
++  CHECK(pCursor->valid()) << "Database \'" << DataPath << "\' is empty.";
++
++  int FrameNumber = 1;
++  int OutputCounter = NumberUntilOutput;
++  bool IsEnd = false;
++  while(!IsEnd)
++  {
++    OutputCounter -= BatchSize;
++
++    if (OutputCounter <= 0)
++    {
++      std::cout << "Process Frame: " << FrameNumber << " to " << (FrameNumber+BatchSize) << std::endl;
++      std::cout.flush();
++    }
++
++    IsEnd = NeuralNet.processBatch(&EstimatedIndicators[0], &Label[0], pCursor, BatchSize);
++
++    ErrorMeas.measureBatch(&EstimatedIndicators[0], &Label[0], BatchSize);
++
++    FrameNumber += BatchSize;
++
++    if (OutputCounter <= 0)
++    {
++      ErrorMeas.print(std::cout);
++      OutputCounter = NumberUntilOutput;
++    }
++  }
++
++  ErrorMeas.print(std::cout);
++  NeuralNet.printTimeSummery(std::cout);
++
++  return 0;
++}
+diff --git a/tools/torcs_visualize_database.cpp b/tools/torcs_visualize_database.cpp
+new file mode 100644
+index 0000000..75ce17c
+--- /dev/null
++++ b/tools/torcs_visualize_database.cpp
+@@ -0,0 +1,176 @@
++/*
++ * torcs_visualize_database.cpp
++ *
++ *  Created on: Mar 24, 2017
++ *      Author: Andre Netzeband
++ *
++ *  This file was initially creates by Chenyi Chen for the DeepDriving project.
++ *  See http://deepdriving.cs.princeton.edu for more details.
++ *
++ *  This implementations uses the latest caffe implementation (1.0.0-rc5) instead of the old
++ *  one used by Chenyi Chen in 2014.
++ */
++
++////////////////////////////////////////////////
++//
++//  Read the pre-collected leveldb database, display the image and
++//  print the corresponding affordance indicators
++//
++//  Input keys
++//  Esc: exit
++//
++////////////////////////////////////////////////
++
++#include <glog/logging.h>
++
++#include "caffe/caffe.hpp"
++#include "caffe/util/db_leveldb.hpp"
++
++#include "torcs/Arguments.hpp"
++#include "torcs/Database.hpp"
++#include "torcs/Semantic.hpp"
++
++#include <opencv2/highgui/highgui.hpp>
++
++#define ImageWidth  280
++#define ImageHeight 210
++
++using namespace caffe;
++using std::string;
++
++bool processKeys();
++
++int main(int argc, char** argv)
++{
++  ::google::InitGoogleLogging(argv[0]);
++
++  string const DatabasePath = getArgument(argc, argv, "--data-path");
++
++  if (DatabasePath.empty())
++  {
++    std::cout << "Please define a path to the database." << std::endl;
++    std::cout << "Example: " << std::endl << std::endl;
++    std::cout << argv[0] << " --data-path pre_trained/TORCS_Training_1F" << std::endl << std::endl;
++    return -1;
++  }
++
++  db::LevelDB Database;
++  Database.Open(DatabasePath, db::READ);
++
++  db::LevelDBCursor * pCursor = Database.NewCursor();
++  CHECK(pCursor)          << "Cannot generate cursor from database \'" << DatabasePath << "\'.";
++  CHECK(pCursor->valid()) << "Database \'" << DatabasePath << "\' is empty.";
++
++  CLabel Label;
++  CImage Image;
++  CSemantic Semantic;
++
++  bool IsEnd = false;
++  int FrameNumber = 0;
++
++  std::cout << std::endl;
++  std::cout << std::endl;
++  std::cout << "Start with visualization in PAUSE mode. Possible Keys:" << std::endl;
++  std::cout << " p = Pause on/off, n = next frame, + = faster, - = slower, ESC = stop" << std::endl;
++  std::cout << std::endl;
++  std::cout << std::endl;
++
++  Semantic.setFrameImage(&Image);
++
++  while(pCursor->valid() && !IsEnd)
++  {
++    FrameNumber++;
++    std::cout << "Frame: " << FrameNumber << std::endl;
++    std::cout.flush();
++
++    Datum Data;
++    Data.ParseFromString(pCursor->value());
++
++    Label.readFromDatum(Data);
++    Image.readFromDatum(Data);
++
++    Label.Indicators.print(std::cout);
++    Semantic.show(&Label.Indicators, 0, true);
++
++    pCursor->Next();
++
++    IsEnd = processKeys();
++  }
++
++  if (!IsEnd)
++  {
++    std::cout << "Database contains " << FrameNumber << " frames." << std::endl;
++  }
++  else
++  {
++    std::cout << "Abort database read after frame " << FrameNumber << "." << std::endl;
++  }
++
++  return 0;
++}
++
++bool processKeys()
++{
++  static bool IsPause = true;
++  static const char PauseKey = 'p';
++  static const char NextKey  = 'n';
++  static const char EscKey   = 27;
++  static const char PlusKey = '+';
++  static const char MinusKey = '-';
++  static const int WaitStep = 100;
++  static int WaitTime = 500;
++  static int KeyTime = 20;
++
++
++  bool IsNext = false;
++  int Time = WaitTime;
++
++  while(!IsNext)
++  {
++    char Key = cvWaitKey(KeyTime);
++
++    if (IsPause)
++    {
++      IsNext = false;
++    }
++    else
++    {
++      Time -= KeyTime;
++      IsNext = Time <= 0;
++    }
++
++    // Escape Key
++    if (Key == EscKey)
++    {
++      return true;
++    }
++
++    if (Key == PauseKey)
++    {
++      IsPause = !IsPause;
++    }
++
++    if (Key == PlusKey)
++    {
++      Time -= WaitTime;
++      WaitTime = std::max(0, WaitTime - WaitStep);
++      Time += WaitTime;
++    }
++
++    if (Key == MinusKey)
++    {
++      Time -= WaitTime;
++      WaitTime = std::max(0, WaitTime + WaitStep);
++      Time += WaitTime;
++    }
++
++    if (Key == NextKey)
++    {
++      IsNext = true;
++    }
++  }
++
++  return false;
++}
++
++
+diff --git a/torcs/pre_trained/driving_mean_1F.binaryproto b/torcs/pre_trained/driving_mean_1F.binaryproto
+new file mode 100644
+index 0000000..7dd2a97
+--- /dev/null
++++ b/torcs/pre_trained/driving_mean_1F.binaryproto
+@@ -0,0 +1,3 @@
++version https://git-lfs.github.com/spec/v1
++oid sha256:66fe11ff722748552653f36878ddbaf59425e369c368727b972fc67ee8a67807
++size 705614
+diff --git a/torcs/pre_trained/driving_run_1F.prototxt b/torcs/pre_trained/driving_run_1F.prototxt
+new file mode 100644
+index 0000000..b547d02
+--- /dev/null
++++ b/torcs/pre_trained/driving_run_1F.prototxt
+@@ -0,0 +1,249 @@
++name: "TORCS_Net"
++layer {
++  name: "data"
++  type: "Input"
++  top: "data"
++  input_param { 
++    shape: { 
++      dim: 1 
++      dim: 3 
++      dim: 210 
++      dim: 280 
++    } 
++  }
++  transform_param {
++    crop_size: 0
++    mean_file: "pre_trained/driving_mean_1F.blabla_binaryproto"
++    mirror: false
++  }
++}
++layer {
++  name: "conv1"
++  type: "Convolution"
++  bottom: "data"
++  top: "conv1"
++  convolution_param {
++    num_output: 96
++    kernel_size: 11
++    stride: 4
++  }
++}
++layer {
++  name: "relu1"
++  type: "ReLU"
++  bottom: "conv1"
++  top: "conv1"
++}
++layer {
++  name: "pool1"
++  type: "Pooling"
++  bottom: "conv1"
++  top: "pool1"
++  pooling_param {
++    pool: MAX
++    kernel_size: 3
++    stride: 2
++  }
++}
++layer {
++  name: "norm1"
++  type: "LRN"
++  bottom: "pool1"
++  top: "norm1"
++  lrn_param {
++    local_size: 5
++    alpha: 0.0001
++    beta: 0.75
++  }
++}
++layer {
++  name: "conv2"
++  type: "Convolution"
++  bottom: "norm1"
++  top: "conv2"
++  convolution_param {
++    num_output: 256
++    pad: 2
++    kernel_size: 5
++    group: 2
++  }
++}
++layer {
++  name: "relu2"
++  type: "ReLU"
++  bottom: "conv2"
++  top: "conv2"
++}
++layer {
++  name: "pool2"
++  type: "Pooling"
++  bottom: "conv2"
++  top: "pool2"
++  pooling_param {
++    pool: MAX
++    kernel_size: 3
++    stride: 2
++  }
++}
++layer {
++  name: "norm2"
++  type: "LRN"
++  bottom: "pool2"
++  top: "norm2"
++  lrn_param {
++    local_size: 5
++    alpha: 0.0001
++    beta: 0.75
++  }
++}
++layer {
++  name: "conv3"
++  type: "Convolution"
++  bottom: "norm2"
++  top: "conv3"
++  convolution_param {
++    num_output: 384
++    pad: 1
++    kernel_size: 3
++  }
++}
++layer {
++  name: "relu3"
++  type: "ReLU"
++  bottom: "conv3"
++  top: "conv3"
++}
++layer {
++  name: "conv4"
++  type: "Convolution"
++  bottom: "conv3"
++  top: "conv4"
++  convolution_param {
++    num_output: 384
++    pad: 1
++    kernel_size: 3
++    group: 2
++  }
++}
++layer {
++  name: "relu4"
++  type: "ReLU"
++  bottom: "conv4"
++  top: "conv4"
++}
++layer {
++  name: "conv5"
++  type: "Convolution"
++  bottom: "conv4"
++  top: "conv5"
++  convolution_param {
++    num_output: 256
++    pad: 1
++    kernel_size: 3
++    group: 2
++  }
++}
++layer {
++  name: "relu5"
++  type: "ReLU"
++  bottom: "conv5"
++  top: "conv5"
++}
++layer {
++  name: "pool5"
++  type: "Pooling"
++  bottom: "conv5"
++  top: "pool5"
++  pooling_param {
++    pool: MAX
++    kernel_size: 3
++    stride: 2
++  }
++}
++layer {
++  name: "fc6"
++  type: "InnerProduct"
++  bottom: "pool5"
++  top: "fc6"
++  inner_product_param {
++    num_output: 4096
++  }
++}
++layer {
++  name: "relu6"
++  type: "ReLU"
++  bottom: "fc6"
++  top: "fc6"
++}
++layer {
++  name: "drop6"
++  type: "Dropout"
++  bottom: "fc6"
++  top: "fc6"
++  dropout_param {
++    dropout_ratio: 0.5
++  }
++}
++layer {
++  name: "fc7"
++  type: "InnerProduct"
++  bottom: "fc6"
++  top: "fc7"
++  inner_product_param {
++    num_output: 4096
++  }
++}
++layer {
++  name: "relu7"
++  type: "ReLU"
++  bottom: "fc7"
++  top: "fc7"
++}
++layer {
++  name: "drop7"
++  type: "Dropout"
++  bottom: "fc7"
++  top: "fc7"
++  dropout_param {
++    dropout_ratio: 0.5
++  }
++}
++layer {
++  name: "fc8"
++  type: "InnerProduct"
++  bottom: "fc7"
++  top: "fc8"
++  inner_product_param {
++    num_output: 256
++  }
++}
++layer {
++  name: "relu8"
++  type: "ReLU"
++  bottom: "fc8"
++  top: "fc8"
++}
++layer {
++  name: "drop8"
++  type: "Dropout"
++  bottom: "fc8"
++  top: "fc8"
++  dropout_param {
++    dropout_ratio: 0.5
++  }
++}
++layer {
++  name: "fc9"
++  type: "InnerProduct"
++  bottom: "fc8"
++  top: "fc9"
++  inner_product_param {
++    num_output: 14
++  }
++}
++layer {
++  name: "relu9"
++  type: "Sigmoid"
++  bottom: "fc9"
++  top: "fc9"
++}
+diff --git a/torcs/pre_trained/driving_solver_1F.prototxt b/torcs/pre_trained/driving_solver_1F.prototxt
+new file mode 100644
+index 0000000..ae61d02
+--- /dev/null
++++ b/torcs/pre_trained/driving_solver_1F.prototxt
+@@ -0,0 +1,12 @@
++net: "pre_trained/driving_train_1F.prototxt"
++base_lr: 0.01
++lr_policy: "step"
++gamma: 0.9
++stepsize: 8000
++display: 100
++max_iter: 300000
++momentum: 0.9
++weight_decay: 0.0005
++snapshot: 2000
++snapshot_prefix: "pre_trained/driving_train_1F"
++solver_mode: GPU
+diff --git a/torcs/pre_trained/driving_train_1F.prototxt b/torcs/pre_trained/driving_train_1F.prototxt
+new file mode 100644
+index 0000000..a1119b2
+--- /dev/null
++++ b/torcs/pre_trained/driving_train_1F.prototxt
+@@ -0,0 +1,362 @@
++name: "TORCS_Net"
++layers {
++  name: "data"
++  type: DATA
++  top: "data"
++  top: "label"
++  data_param {
++    source: "pre_trained/TORCS_Training_1F"
++    backend: LEVELDB
++    batch_size: 64
++  }
++  transform_param {
++    crop_size: 0
++    mean_file: "pre_trained/driving_mean_1F.binaryproto"
++    mirror: false
++  }
++}
++layers {
++  name: "conv1"
++  type: CONVOLUTION
++  bottom: "data"
++  top: "conv1"
++  blobs_lr: 1
++  blobs_lr: 2
++  weight_decay: 1
++  weight_decay: 0
++  convolution_param {
++    num_output: 96
++    kernel_size: 11
++    stride: 4
++    weight_filler {
++      type: "gaussian"
++      std: 0.01
++    }
++    bias_filler {
++      type: "constant"
++      value: 0
++    }
++  }
++}
++layers {
++  name: "relu1"
++  type: RELU
++  bottom: "conv1"
++  top: "conv1"
++}
++layers {
++  name: "pool1"
++  type: POOLING
++  bottom: "conv1"
++  top: "pool1"
++  pooling_param {
++    pool: MAX
++    kernel_size: 3
++    stride: 2
++  }
++}
++layers {
++  name: "norm1"
++  type: LRN
++  bottom: "pool1"
++  top: "norm1"
++  lrn_param {
++    local_size: 5
++    alpha: 0.0001
++    beta: 0.75
++  }
++}
++layers {
++  name: "conv2"
++  type: CONVOLUTION
++  bottom: "norm1"
++  top: "conv2"
++  blobs_lr: 1
++  blobs_lr: 2
++  weight_decay: 1
++  weight_decay: 0
++  convolution_param {
++    num_output: 256
++    pad: 2
++    kernel_size: 5
++    group: 2
++    weight_filler {
++      type: "gaussian"
++      std: 0.01
++    }
++    bias_filler {
++      type: "constant"
++      value: 1
++    }
++  }
++}
++layers {
++  name: "relu2"
++  type: RELU
++  bottom: "conv2"
++  top: "conv2"
++}
++layers {
++  name: "pool2"
++  type: POOLING
++  bottom: "conv2"
++  top: "pool2"
++  pooling_param {
++    pool: MAX
++    kernel_size: 3
++    stride: 2
++  }
++}
++layers {
++  name: "norm2"
++  type: LRN
++  bottom: "pool2"
++  top: "norm2"
++  lrn_param {
++    local_size: 5
++    alpha: 0.0001
++    beta: 0.75
++  }
++}
++layers {
++  name: "conv3"
++  type: CONVOLUTION
++  bottom: "norm2"
++  top: "conv3"
++  blobs_lr: 1
++  blobs_lr: 2
++  weight_decay: 1
++  weight_decay: 0
++  convolution_param {
++    num_output: 384
++    pad: 1
++    kernel_size: 3
++    weight_filler {
++      type: "gaussian"
++      std: 0.01
++    }
++    bias_filler {
++      type: "constant"
++      value: 0
++    }
++  }
++}
++layers {
++  name: "relu3"
++  type: RELU
++  bottom: "conv3"
++  top: "conv3"
++}
++layers {
++  name: "conv4"
++  type: CONVOLUTION
++  bottom: "conv3"
++  top: "conv4"
++  blobs_lr: 1
++  blobs_lr: 2
++  weight_decay: 1
++  weight_decay: 0
++  convolution_param {
++    num_output: 384
++    pad: 1
++    kernel_size: 3
++    group: 2
++    weight_filler {
++      type: "gaussian"
++      std: 0.01
++    }
++    bias_filler {
++      type: "constant"
++      value: 1
++    }
++  }
++}
++layers {
++  name: "relu4"
++  type: RELU
++  bottom: "conv4"
++  top: "conv4"
++}
++layers {
++  name: "conv5"
++  type: CONVOLUTION
++  bottom: "conv4"
++  top: "conv5"
++  blobs_lr: 1
++  blobs_lr: 2
++  weight_decay: 1
++  weight_decay: 0
++  convolution_param {
++    num_output: 256
++    pad: 1
++    kernel_size: 3
++    group: 2
++    weight_filler {
++      type: "gaussian"
++      std: 0.01
++    }
++    bias_filler {
++      type: "constant"
++      value: 1
++    }
++  }
++}
++layers {
++  name: "relu5"
++  type: RELU
++  bottom: "conv5"
++  top: "conv5"
++}
++layers {
++  name: "pool5"
++  type: POOLING
++  bottom: "conv5"
++  top: "pool5"
++  pooling_param {
++    pool: MAX
++    kernel_size: 3
++    stride: 2
++  }
++}
++layers {
++  name: "fc6"
++  type: INNER_PRODUCT
++  bottom: "pool5"
++  top: "fc6"
++  blobs_lr: 1
++  blobs_lr: 2
++  weight_decay: 1
++  weight_decay: 0
++  inner_product_param {
++    num_output: 4096
++    weight_filler {
++      type: "gaussian"
++      std: 0.005
++    }
++    bias_filler {
++      type: "constant"
++      value: 1
++    }
++  }
++}
++layers {
++  name: "relu6"
++  type: RELU
++  bottom: "fc6"
++  top: "fc6"
++}
++layers {
++  name: "drop6"
++  type: DROPOUT
++  bottom: "fc6"
++  top: "fc6"
++  dropout_param {
++    dropout_ratio: 0.5
++  }
++}
++layers {
++  name: "fc7"
++  type: INNER_PRODUCT
++  bottom: "fc6"
++  top: "fc7"
++  blobs_lr: 1
++  blobs_lr: 2
++  weight_decay: 1
++  weight_decay: 0
++  inner_product_param {
++    num_output: 4096
++    weight_filler {
++      type: "gaussian"
++      std: 0.005
++    }
++    bias_filler {
++      type: "constant"
++      value: 1
++    }
++  }
++}
++layers {
++  name: "relu7"
++  type: RELU
++  bottom: "fc7"
++  top: "fc7"
++}
++layers {
++  name: "drop7"
++  type: DROPOUT
++  bottom: "fc7"
++  top: "fc7"
++  dropout_param {
++    dropout_ratio: 0.5
++  }
++}
++layers {
++  name: "fc8"
++  type: INNER_PRODUCT
++  bottom: "fc7"
++  top: "fc8"
++  blobs_lr: 1
++  blobs_lr: 2
++  weight_decay: 1
++  weight_decay: 0
++  inner_product_param {
++    num_output: 256
++    weight_filler {
++      type: "gaussian"
++      std: 0.01
++    }
++    bias_filler {
++      type: "constant"
++      value: 0
++    }
++  }
++}
++layers {
++  name: "relu8"
++  type: RELU
++  bottom: "fc8"
++  top: "fc8"
++}
++layers {
++  name: "drop8"
++  type: DROPOUT
++  bottom: "fc8"
++  top: "fc8"
++  dropout_param {
++    dropout_ratio: 0.5
++  }
++}
++layers {
++  name: "fc9"
++  type: INNER_PRODUCT
++  bottom: "fc8"
++  top: "fc9"
++  blobs_lr: 1
++  blobs_lr: 2
++  weight_decay: 1
++  weight_decay: 0
++  inner_product_param {
++    num_output: 14
++    weight_filler {
++      type: "gaussian"
++      std: 0.01
++    }
++    bias_filler {
++      type: "constant"
++      value: 0
++    }
++  }
++}
++layers {
++  name: "relu9"
++  type: SIGMOID
++  bottom: "fc9"
++  top: "fc9"
++}
++layers {
++  name: "loss"
++  type: EUCLIDEAN_LOSS
++  bottom: "fc9"
++  bottom: "label"
++  top: "loss"
++}
+diff --git a/torcs/pre_trained/driving_train_1F_iter_140000.caffemodel b/torcs/pre_trained/driving_train_1F_iter_140000.caffemodel
+new file mode 100644
+index 0000000..6cee814
+--- /dev/null
++++ b/torcs/pre_trained/driving_train_1F_iter_140000.caffemodel
+@@ -0,0 +1,3 @@
++version https://git-lfs.github.com/spec/v1
++oid sha256:93ec6b83bc6e6e40bac3512c8dd0f0d3c1a93567d14243359c3de4530be5a6a7
++size 282015991
+diff --git a/torcs/semantic_1lane.png b/torcs/semantic_1lane.png
+new file mode 100644
+index 0000000000000000000000000000000000000000..a0bbbf619f802878b3cf6eee6fa9bac00a736574
+GIT binary patch
+literal 836
+zcmeAS@N?(olHy`uVBq!ia0vp^_6!V6Q#jawtj*F7ZUZTnVkgfK4j`!ENa+Ad{`Pcn
+z45^s&_WVZP!v+E@j*-3-d3R))JA|gDcS%SyrK#_F(0u>8#N+CmHRns;|CHN3**!Y@
+zZuPmHdoBNeJtHi-UMnti&#H>hkE<Sq9$noPJ}NL89z!EJ{9>$7;W@Kp`gti}wqWpd
+L^>bP0l+XkKuNI&L
+
+literal 0
+HcmV?d00001
+
+diff --git a/torcs/semantic_2lane.png b/torcs/semantic_2lane.png
+new file mode 100644
+index 0000000000000000000000000000000000000000..cde0e21b6e7d9753d21025ed1b2257e8c815f43a
+GIT binary patch
+literal 1619
+zcmeAS@N?(olHy`uVBq!ia0vp^xeN?UQ#jawEWTgc)&VJ&VkgfK4j`!ENa<i;VB_+1
+zaSW-L^Y-FK-a`%ou8uyz<-7r=ymMAJooV#kxK#bDOZ=^rrQ3TA?fNHwz1MFW|G4H^
+zQuf;9^Op7R&RfraXz#);r0cOo;bPM$V>A#(Q^II27|jJkG8eqyK0Sr!%(Q(6X8~&o
+N22WQ%mvv4FO#r1S96bO4
+
+literal 0
+HcmV?d00001
+
+diff --git a/torcs/semantic_3lane.png b/torcs/semantic_3lane.png
+new file mode 100644
+index 0000000000000000000000000000000000000000..75b9942d57af5bfa6ee9b6a8bb4c7fcf074ca82c
+GIT binary patch
+literal 1783
+zcmeAS@N?(olHy`uVBq!ia0vp^a~T+zrf{$US#sN~%z+e3v6E*A2N2Y7q;xPau&wiS
+zaSW-L^Y+q4UM52US4ZdIGUgCp=4GpPziDz-s!=h%INj{#1KVeFj_<hn{`}VK+4s(W
+zxP0&Tt?aeye{Zf~J0>7ouV7WQNLhW97!8BbbTFC?MvH>cl8|O4q55k^o-=z*TEc-f
+O8H1;*pUXO@geCy)S3TeW
+
+literal 0
+HcmV?d00001
+
+diff --git a/torcs/semantic_background.png b/torcs/semantic_background.png
+new file mode 100644
+index 0000000000000000000000000000000000000000..2a05104fcca48b14959e5c804da6f4fb7001f3f9
+GIT binary patch
+literal 2250
+zcmeAS@N?(olHy`uVBq!ia0y~yV02($V4A|g1{5j1{*Vtyu@pObhHwBu4M$1`0|Q5+
+zr;B4q#hkZS92pq|7!EjWx#<0$>&S;2u}yo;zDJfbu&lk$$gp2RVM1zy!!$;wNH&fX
+z$x+T|7>uTa(Y!EP9*mZWqxHgQbx28*;2QJCmu%bKo>1KmY@9H7y85}Sb4q9e0J`=?
+Ai2wiq
+
+literal 0
+HcmV?d00001
+
+diff --git a/torcs/semantic_background_big.png b/torcs/semantic_background_big.png
+new file mode 100644
+index 0000000000000000000000000000000000000000..4113721aa394c3cc2bc6d25c67d05f067da319f2
+GIT binary patch
+literal 3324
+zcmeAS@N?(olHy`uVBq!ia0y~yVA=!3Q#jawBF|i3O8_aBVkgfK4j`!ENa<i;;Mwfy
+z;uumf=j}B|-UA8@2M#n!*F3z>6zu3R%bK;eY>n-Cb_RyP&!s?}cTy@C89a=ECN7bT
+zV_>+%qtC#Q*(T1=U~-t7!C}@zRtAN$AD9>>q>U;Y4Uo|kGMX1g3y0Cta<pC;ttdyE
+m1fy-F(MIEF^O#!wg}*sYY}*Wj{BHp}B@CXfelF{r5}E+1cc%3K
+
+literal 0
+HcmV?d00001
+
+diff --git a/torcs/semantic_error_background.png b/torcs/semantic_error_background.png
+new file mode 100644
+index 0000000000000000000000000000000000000000..ccf499c34d5e28049617d747313fb4d9f5ec7f50
+GIT binary patch
+literal 11529
+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
+S8(42MKuJy=^i{?(^8WyF9*@ib
+
+literal 0
+HcmV?d00001
+
+diff --git a/torcs/torcs_run.sh b/torcs/torcs_run.sh
+new file mode 100644
+index 0000000..8a56d6c
+--- /dev/null
++++ b/torcs/torcs_run.sh
+@@ -0,0 +1,105 @@
++#!/usr/bin/env sh
++
++if [ -z "$DEEPDRIVING_CAFFE_PATH" ]; then
++  echo "Error: Please specify path to DeepDriving caffe installation with: "
++  echo "export DEEPDRIVING_CAFFE_PATH=<path-to-installation>"
++  echo " "
++  exit -1
++
++else
++
++  LANES=$1
++  MODEL=$2
++  WEIGTHS=$3
++  MEAN=$4
++  GPU=$5
++
++  if [ -z "$MODEL" ]; then
++    if [ -z "$DEEPDRIVING_MODEL_PATH" ]; then
++      if [ -e pre_trained/driving_run_1F.prototxt ]; then
++        MODEL=`pwd`"/pre_trained/driving_run_1F.prototxt"
++        echo $MODEL
++
++      else
++        echo "Error: Please specify path to DeepDriving model with: "
++        echo "export DEEPDRIVING_MODEL_PATH=<path-to-model>"
++        echo " "
++        exit -1
++
++      fi
++
++    else
++      MODEL=$DEEPDRIVING_MODEL_PATH
++
++    fi
++  fi
++
++  if [ -z "$WEIGTHS" ]; then
++    if [ -z "$DEEPDRIVING_WEIGHTS_PATH" ]; then
++      if [ -e pre_trained/driving_train_1F_iter_140000.caffemodel ]; then
++        WEIGHTS=`pwd`"/pre_trained/driving_train_1F_iter_140000.caffemodel"
++
++      else
++        echo "Error: Please specify path to DeepDriving weights with: "
++        echo "export DEEPDRIVING_WEIGHTS_PATH=<path-to-weights>"
++        echo " "
++        exit -1
++
++      fi
++
++    else
++      WEIGTHS=$DEEPDRIVING_WEIGHTS_PATH
++
++    fi
++  fi
++
++  if [ -z "$MEAN" ]; then
++    if [ -z "$DEEPDRIVING_MEAN_PATH" ]; then
++      if [ -e pre_trained/driving_mean_1F.binaryproto ]; then
++        MEAN=`pwd`"/pre_trained/driving_mean_1F.binaryproto"
++
++      else
++        echo "Error: Please specify path to DeepDriving mean-file with: "
++        echo "export DEEPDRIVING_MEAN_PATH=<path-to-mean-file>"
++        echo " "
++        exit -1
++
++      fi
++
++    else
++      MEAN=$DEEPDRIVING_MEAN_PATH
++
++    fi
++  fi
++
++  if [ -z "$LANES" ]; then
++    echo "Error: Please specify the number of lanes as first parameter: "
++    echo "./torcs_run.sh 3"
++    echo " "
++    exit -1
++
++  fi
++
++  if [ -z "$GPU" ]; then
++    if [ -z "$DEEPDRIVING_GPU" ]; then
++	echo "WARNING: Disable GPU by default. Specify GPU ID to enable it:"
++        echo "export DEEPDRIVING_GPU=<gpu-id>"
++        echo " "
++	GPU=-1
++
++    else
++      GPU=$DEEPDRIVING_GPU
++
++    fi
++
++  fi
++
++  echo "Use Model:   " $MODEL
++  echo "Use Weights: " $WEIGTHS
++
++  BIN_PATH=$DEEPDRIVING_CAFFE_PATH/bin
++#  cd $BIN_PATH && (GLOG_logtostderr=1 ./torcs_run --model $MODEL --weights $WEIGHTS --mean $MEAN --lanes $LANES --gpu $GPU)
++  GLOG_logtostderr=1 $BIN_PATH/torcs_run --model $MODEL --weights $WEIGTHS --mean $MEAN --lanes $LANES --gpu $GPU
++fi
++
++
+diff --git a/torcs/torcs_train.sh b/torcs/torcs_train.sh
+new file mode 100644
+index 0000000..4c4dc3a
+--- /dev/null
++++ b/torcs/torcs_train.sh
+@@ -0,0 +1,56 @@
++#!/usr/bin/env sh
++
++if [ -z "$DEEPDRIVING_CAFFE_PATH" ]; then
++  echo "Error: Please specify path to DeepDriving caffe installation with: "
++  echo "export DEEPDRIVING_CAFFE_PATH=<path-to-installation>"
++  echo " "
++  exit -1
++
++else
++
++  GPU=$1
++  STATE=$2
++  SOLVER=$3
++
++  if [ -z "$SOLVER" ]; then
++    if [ -z "$DEEPDRIVING_SOLVER_PATH" ]; then
++      if [ -e pre_trained/driving_solver_1F.prototxt ]; then
++        SOLVER=`pwd`"/pre_trained/driving_solver_1F.prototxt"
++
++      else
++        echo "Error: Please specify path to DeepDriving solver model with: "
++        echo "export DEEPDRIVING_SOLVER_PATH=<path-to-solver-model>"
++        echo " "
++        exit -1
++
++      fi
++
++    else
++      SOLVER=$DEEPDRIVING_SOLVER_PATH
++
++    fi
++  fi
++
++  if [ -z "$GPU" ]; then
++    if [ -z "$DEEPDRIVING_GPU" ]; then
++	echo "WARNING: Disable GPU by default. Specify GPU ID to enable it:"
++        echo "export DEEPDRIVING_GPU=<gpu-id>"
++        echo " "
++	GPU=-1
++
++    else
++      GPU=$DEEPDRIVING_GPU
++
++    fi
++
++  fi
++
++  BIN_PATH=$DEEPDRIVING_CAFFE_PATH/bin
++
++  if [ -z "$STATE" ]; then
++    GLOG_logtostderr=1 $BIN_PATH/caffe train --solver=$SOLVER --gpu=$GPU
++  else
++    GLOG_logtostderr=1 $BIN_PATH/caffe train --solver=$SOLVER --gpu=$GPU --snapshot=$STATE
++  fi
++fi
++
+diff --git a/torcs/torcs_verify.sh b/torcs/torcs_verify.sh
+new file mode 100644
+index 0000000..127b5fc
+--- /dev/null
++++ b/torcs/torcs_verify.sh
+@@ -0,0 +1,106 @@
++#!/usr/bin/env sh
++
++if [ -z "$DEEPDRIVING_CAFFE_PATH" ]; then
++  echo "Error: Please specify path to DeepDriving caffe installation with: "
++  echo "export DEEPDRIVING_CAFFE_PATH=<path-to-installation>"
++  echo " "
++  exit -1
++
++else
++
++  DATABASE=$1
++  MODEL=$2
++  WEIGHTS=$3
++  MEAN=$4
++  GPU=$5
++
++  if [ -z "$DATABASE" ]; then
++    if [ -z "$DEEPDRIVING_DATABASE_PATH" ]; then
++      echo "Error: Please specify path to DeepDriving database with: "
++      echo "export DEEPDRIVING_DATABASE_PATH=<path-to-database>"
++      echo " "
++      exit -1
++
++    else
++      DATABASE=$DEEPDRIVING_DATABASE_PATH
++
++    fi
++  fi
++
++  if [ -z "$MODEL" ]; then
++    if [ -z "$DEEPDRIVING_MODEL_PATH" ]; then
++      if [ -e pre_trained/driving_run_1F.prototxt ]; then
++        MODEL=`pwd`"/pre_trained/driving_run_1F.prototxt"
++        echo $MODEL
++
++      else
++        echo "Error: Please specify path to DeepDriving model with: "
++        echo "export DEEPDRIVING_MODEL_PATH=<path-to-model>"
++        echo " "
++        exit -1
++
++      fi
++
++    else
++      MODEL=$DEEPDRIVING_MODEL_PATH
++
++    fi
++  fi
++
++  if [ -z "$WEIGHTS" ]; then
++    if [ -z "$DEEPDRIVING_WEIGHTS_PATH" ]; then
++      if [ -e pre_trained/driving_train_1F_iter_140000.caffemodel ]; then
++        WEIGHTS=`pwd`"/pre_trained/driving_train_1F_iter_140000.caffemodel"
++
++      else
++        echo "Error: Please specify path to DeepDriving weights with: "
++        echo "export DEEPDRIVING_WEIGHTS_PATH=<path-to-weights>"
++        echo " "
++        exit -1
++
++      fi
++
++    else
++      WEIGHTS=$DEEPDRIVING_WEIGHTS_PATH
++
++    fi
++  fi
++
++  if [ -z "$MEAN" ]; then
++    if [ -z "$DEEPDRIVING_MEAN_PATH" ]; then
++      if [ -e pre_trained/driving_mean_1F.binaryproto ]; then
++        MEAN=`pwd`"/pre_trained/driving_mean_1F.binaryproto"
++
++      else
++        echo "Error: Please specify path to DeepDriving mean-file with: "
++        echo "export DEEPDRIVING_MEAN_PATH=<path-to-mean-file>"
++        echo " "
++        exit -1
++
++      fi
++
++    else
++      MEAN=$DEEPDRIVING_MEAN_PATH
++
++    fi
++  fi
++
++  if [ -z "$GPU" ]; then
++    if [ -z "$DEEPDRIVING_GPU" ]; then
++	echo "WARNING: Disable GPU by default. Specify GPU ID to enable it:"
++        echo "export DEEPDRIVING_GPU=<gpu-id>"
++        echo " "
++	GPU=-1
++
++    else
++      GPU=$DEEPDRIVING_GPU
++
++    fi
++
++  fi
++
++  BIN_PATH=$DEEPDRIVING_CAFFE_PATH/bin
++  GLOG_logtostderr=1 $BIN_PATH/torcs_verify --data $DATABASE --model $MODEL --weights $WEIGHTS --mean $MEAN --gpu $GPU
++fi
++
++
+diff --git a/torcs/torcs_verify_fast.sh b/torcs/torcs_verify_fast.sh
+new file mode 100644
+index 0000000..943c263
+--- /dev/null
++++ b/torcs/torcs_verify_fast.sh
+@@ -0,0 +1,106 @@
++#!/usr/bin/env sh
++
++if [ -z "$DEEPDRIVING_CAFFE_PATH" ]; then
++  echo "Error: Please specify path to DeepDriving caffe installation with: "
++  echo "export DEEPDRIVING_CAFFE_PATH=<path-to-installation>"
++  echo " "
++  exit -1
++
++else
++
++  DATABASE=$1
++  MODEL=$2
++  WEIGHTS=$3
++  MEAN=$4
++  GPU=$5
++
++  if [ -z "$DATABASE" ]; then
++    if [ -z "$DEEPDRIVING_DATABASE_PATH" ]; then
++      echo "Error: Please specify path to DeepDriving database with: "
++      echo "export DEEPDRIVING_DATABASE_PATH=<path-to-database>"
++      echo " "
++      exit -1
++
++    else
++      DATABASE=$DEEPDRIVING_DATABASE_PATH
++
++    fi
++  fi
++
++  if [ -z "$MODEL" ]; then
++    if [ -z "$DEEPDRIVING_MODEL_PATH" ]; then
++      if [ -e pre_trained/driving_run_1F.prototxt ]; then
++        MODEL=`pwd`"/pre_trained/driving_run_1F.prototxt"
++        echo $MODEL
++
++      else
++        echo "Error: Please specify path to DeepDriving model with: "
++        echo "export DEEPDRIVING_MODEL_PATH=<path-to-model>"
++        echo " "
++        exit -1
++
++      fi
++
++    else
++      MODEL=$DEEPDRIVING_MODEL_PATH
++
++    fi
++  fi
++
++  if [ -z "$WEIGHTS" ]; then
++    if [ -z "$DEEPDRIVING_WEIGHTS_PATH" ]; then
++      if [ -e pre_trained/driving_train_1F_iter_140000.caffemodel ]; then
++        WEIGHTS=`pwd`"/pre_trained/driving_train_1F_iter_140000.caffemodel"
++
++      else
++        echo "Error: Please specify path to DeepDriving weights with: "
++        echo "export DEEPDRIVING_WEIGHTS_PATH=<path-to-weights>"
++        echo " "
++        exit -1
++
++      fi
++
++    else
++      WEIGHTS=$DEEPDRIVING_WEIGHTS_PATH
++
++    fi
++  fi
++
++  if [ -z "$MEAN" ]; then
++    if [ -z "$DEEPDRIVING_MEAN_PATH" ]; then
++      if [ -e pre_trained/driving_mean_1F.binaryproto ]; then
++        MEAN=`pwd`"/pre_trained/driving_mean_1F.binaryproto"
++
++      else
++        echo "Error: Please specify path to DeepDriving mean-file with: "
++        echo "export DEEPDRIVING_MEAN_PATH=<path-to-mean-file>"
++        echo " "
++        exit -1
++
++      fi
++
++    else
++      MEAN=$DEEPDRIVING_MEAN_PATH
++
++    fi
++  fi
++
++  if [ -z "$GPU" ]; then
++    if [ -z "$DEEPDRIVING_GPU" ]; then
++	echo "WARNING: Disable GPU by default. Specify GPU ID to enable it:"
++        echo "export DEEPDRIVING_GPU=<gpu-id>"
++        echo " "
++	GPU=-1
++
++    else
++      GPU=$DEEPDRIVING_GPU
++
++    fi
++
++  fi
++
++  BIN_PATH=$DEEPDRIVING_CAFFE_PATH/bin
++  GLOG_logtostderr=1 $BIN_PATH/torcs_verify_fast --data $DATABASE --model $MODEL --weights $WEIGHTS --mean $MEAN --gpu $GPU
++fi
++
++
+diff --git a/torcs/torcs_visualize_database.sh b/torcs/torcs_visualize_database.sh
+new file mode 100644
+index 0000000..770947e
+--- /dev/null
++++ b/torcs/torcs_visualize_database.sh
+@@ -0,0 +1,30 @@
++#!/usr/bin/env sh
++
++if [ -z "$DEEPDRIVING_CAFFE_PATH" ]; then
++  echo "Error: Please specify path to DeepDriving caffe installation with: "
++  echo "export DEEPDRIVING_CAFFE_PATH=<path-to-installation>"
++  echo " "
++  exit -1
++
++else
++
++  DATABASE=$1
++
++  if [ -z "$DATABASE" ]; then
++    if [ -z "$DEEPDRIVING_DATABASE_PATH" ]; then
++      echo "Error: Please specify path to DeepDriving database with: "
++      echo "export DEEPDRIVING_DATABASE_PATH=<path-to-database>"
++      echo " "
++      exit -1
++
++    else
++      DATABASE=$DEEPDRIVING_DATABASE_PATH
++
++    fi
++  fi
++
++  BIN_PATH=$DEEPDRIVING_CAFFE_PATH/bin
++  GLOG_logtostderr=1 $BIN_PATH/torcs_visualize_database --data-path $DATABASE
++fi
++
++
+-- 
+1.9.1
+

@@ -1,0 +1,472 @@
+From bfe9d139fa3c84a16c4b0ef008fae23e7543f8c2 Mon Sep 17 00:00:00 2001
+From: Andre Netzeband <andre@netzeband.de>
+Date: Fri, 7 Apr 2017 17:40:14 +0200
+Subject: [PATCH] DeepDriving related changes to caffe.
+
+---
+ .gitignore                                |  4 ++
+ CMakeLists.txt                            |  9 ++++
+ cmake/Cuda.cmake                          |  6 ++-
+ include/caffe/layers/data_layer.hpp       |  3 ++
+ include/caffe/util/db.hpp                 |  1 +
+ include/caffe/util/db_leveldb.hpp         | 19 +++++++-
+ include/caffe/util/db_lmdb.hpp            |  1 +
+ src/caffe/layers/data_layer.cpp           | 52 +++++++++++++++++----
+ src/caffe/layers/euclidean_loss_layer.cpp | 47 +++++++++++++++++--
+ src/caffe/layers/euclidean_loss_layer.cu  | 75 ++++++++++++++++++++++++++++++-
+ src/caffe/solver.cpp                      | 36 ++++++++++++---
+ 11 files changed, 231 insertions(+), 22 deletions(-)
+ create mode 100644 .gitignore
+
+diff --git a/.gitignore b/.gitignore
+new file mode 100644
+index 0000000..24b93d2
+--- /dev/null
++++ b/.gitignore
+@@ -0,0 +1,4 @@
++build
++install
++python/caffe/_caffe.so
++python/caffe/proto/
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 3056d75..867356f 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -5,6 +5,9 @@ endif()
+ if(POLICY CMP0054)
+   cmake_policy(SET CMP0054 NEW)
+ endif()
++if(POLICY CMP0022)
++  cmake_policy(SET CMP0022 NEW)
++endif()
+ 
+ # ---[ Caffe project
+ project(Caffe C CXX)
+@@ -56,6 +59,12 @@ if(USE_libstdcpp)
+   message("-- Warning: forcing libstdc++ (controlled by USE_libstdcpp option in cmake)")
+ endif()
+ 
++if (CMAKE_VERSION VERSION_LESS "3.1")
++  set(CMAKE_CXX_FLAGS "--std=c++11 ${CMAKE_CXX_FLAGS}")
++else ()
++  set(CMAKE_CXX_STANDARD 11)
++endif ()
++
+ # ---[ Warnings
+ caffe_warnings_disable(CMAKE_CXX_FLAGS -Wno-sign-compare -Wno-uninitialized)
+ 
+diff --git a/cmake/Cuda.cmake b/cmake/Cuda.cmake
+index b2b19e8..3ec2282 100644
+--- a/cmake/Cuda.cmake
++++ b/cmake/Cuda.cmake
+@@ -231,7 +231,7 @@ endfunction()
+ ###  Non macro section
+ ################################################################################################
+ 
+-find_package(CUDA 5.5 QUIET)
++find_package(CUDA 7.0 QUIET)
+ find_cuda_helper_libs(curand)  # cmake 2.8.7 compartibility which doesn't search for curand
+ 
+ if(NOT CUDA_FOUND)
+@@ -259,6 +259,10 @@ caffe_select_nvcc_arch_flags(NVCC_FLAGS_EXTRA)
+ list(APPEND CUDA_NVCC_FLAGS ${NVCC_FLAGS_EXTRA})
+ message(STATUS "Added CUDA NVCC flags for: ${NVCC_FLAGS_EXTRA_readable}")
+ 
++# add C++11 support
++list(APPEND CUDA_NVCC_FLAGS "-std=c++11")
++set(CUDA_PROPAGATE_HOST_FLAGS off)
++
+ # Boost 1.55 workaround, see https://svn.boost.org/trac/boost/ticket/9392 or
+ # https://github.com/ComputationalRadiationPhysics/picongpu/blob/master/src/picongpu/CMakeLists.txt
+ if(Boost_VERSION EQUAL 105500)
+diff --git a/include/caffe/layers/data_layer.hpp b/include/caffe/layers/data_layer.hpp
+index dec5818..9367d09 100644
+--- a/include/caffe/layers/data_layer.hpp
++++ b/include/caffe/layers/data_layer.hpp
+@@ -11,6 +11,8 @@
+ #include "caffe/proto/caffe.pb.h"
+ #include "caffe/util/db.hpp"
+ 
++#include <random>
++
+ namespace caffe {
+ 
+ template <typename Dtype>
+@@ -35,6 +37,7 @@ class DataLayer : public BasePrefetchingDataLayer<Dtype> {
+   shared_ptr<db::DB> db_;
+   shared_ptr<db::Cursor> cursor_;
+   uint64_t offset_;
++  std::mt19937 RandomGenerator;
+ };
+ 
+ }  // namespace caffe
+diff --git a/include/caffe/util/db.hpp b/include/caffe/util/db.hpp
+index 59ec3d3..976c6c6 100644
+--- a/include/caffe/util/db.hpp
++++ b/include/caffe/util/db.hpp
+@@ -16,6 +16,7 @@ class Cursor {
+   virtual ~Cursor() { }
+   virtual void SeekToFirst() = 0;
+   virtual void Next() = 0;
++  virtual void Next(int KeyDiff) = 0;
+   virtual string key() = 0;
+   virtual string value() = 0;
+   virtual bool valid() = 0;
+diff --git a/include/caffe/util/db_leveldb.hpp b/include/caffe/util/db_leveldb.hpp
+index 4cdb6db..ccbfdd0 100644
+--- a/include/caffe/util/db_leveldb.hpp
++++ b/include/caffe/util/db_leveldb.hpp
+@@ -20,7 +20,24 @@ class LevelDBCursor : public Cursor {
+   }
+   ~LevelDBCursor() { delete iter_; }
+   virtual void SeekToFirst() { iter_->SeekToFirst(); }
+-  virtual void Next() { iter_->Next(); }
++
++  virtual void Next(int KeyDiff)
++  {
++    int Key = std::atoi(key().c_str());
++    Key += KeyDiff;
++
++    static int const MaxKeyLength = 256;
++    char KeyString[MaxKeyLength];
++
++    snprintf(KeyString, MaxKeyLength, "%08d", Key);
++    iter_->Seek(leveldb::Slice(KeyString));
++  }
++
++  virtual void Next()
++  {
++    iter_->Next();
++  }
++
+   virtual string key() { return iter_->key().ToString(); }
+   virtual string value() { return iter_->value().ToString(); }
+   virtual bool valid() { return iter_->Valid(); }
+diff --git a/include/caffe/util/db_lmdb.hpp b/include/caffe/util/db_lmdb.hpp
+index ee37032..26092b1 100644
+--- a/include/caffe/util/db_lmdb.hpp
++++ b/include/caffe/util/db_lmdb.hpp
+@@ -27,6 +27,7 @@ class LMDBCursor : public Cursor {
+   }
+   virtual void SeekToFirst() { Seek(MDB_FIRST); }
+   virtual void Next() { Seek(MDB_NEXT); }
++  virtual void Next(int KeyDiff) { Next(); CHECK(false) << "Next(Diff) is not implemented yet!"; }
+   virtual string key() {
+     return string(static_cast<const char*>(mdb_key_.mv_data), mdb_key_.mv_size);
+   }
+diff --git a/src/caffe/layers/data_layer.cpp b/src/caffe/layers/data_layer.cpp
+index 0f1296b..3ad2813 100644
+--- a/src/caffe/layers/data_layer.cpp
++++ b/src/caffe/layers/data_layer.cpp
+@@ -9,6 +9,8 @@
+ #include "caffe/layers/data_layer.hpp"
+ #include "caffe/util/benchmark.hpp"
+ 
++#define LabelDimension 14
++
+ namespace caffe {
+ 
+ template <typename Dtype>
+@@ -18,6 +20,9 @@ DataLayer<Dtype>::DataLayer(const LayerParameter& param)
+   db_.reset(db::GetDB(param.data_param().backend()));
+   db_->Open(param.data_param().source(), db::READ);
+   cursor_.reset(db_->NewCursor());
++
++  std::random_device RandomDevice;
++  RandomGenerator.seed(RandomDevice());
+ }
+ 
+ template <typename Dtype>
+@@ -48,7 +53,11 @@ void DataLayer<Dtype>::DataLayerSetUp(const vector<Blob<Dtype>*>& bottom,
+       << top[0]->width();
+   // label
+   if (this->output_labels_) {
+-    vector<int> label_shape(1, batch_size);
++    vector<int> label_shape(4);
++    label_shape[0] = batch_size;
++    label_shape[1] = 1;
++    label_shape[2] = 1;
++    label_shape[3] = LabelDimension;
+     top[1]->Reshape(label_shape);
+     for (int i = 0; i < this->prefetch_.size(); ++i) {
+       this->prefetch_[i]->label_.Reshape(label_shape);
+@@ -66,14 +75,34 @@ bool DataLayer<Dtype>::Skip() {
+   return !keep;
+ }
+ 
++#include <random>
++
+ template<typename Dtype>
+ void DataLayer<Dtype>::Next() {
+-  cursor_->Next();
+-  if (!cursor_->valid()) {
+-    LOG_IF(INFO, Caffe::root_solver())
+-        << "Restarting data prefetching from start.";
++  // DeepDrivingChanges: Introduce a random shuffle for the leveldb database by sometimes
++  //                     skipping frames
++  //
++  // While I can absolutely understand the performance considerations which lead to the
++  // the decision to not randomly shuffle LevelDB databases in Caffe by default, I can
++  // not understand why there is no option to force shuffle anyway, if the customer is
++  // willing to pay the performance penalty.
++  std::uniform_int_distribution<int> Random(0, 0xFFF);
++  int SkipFrames = Random(RandomGenerator);
++  //int SkipFrames = 0;
++  cursor_->Next(SkipFrames+1);
++
++  while(!cursor_->valid()) {
++    /*LOG_IF(INFO, Caffe::root_solver())
++        << "Restarting data prefetching from start.";*/
+     cursor_->SeekToFirst();
++    std::uniform_int_distribution<int> Random(0, SkipFrames);
++    SkipFrames = Random(RandomGenerator);
++    cursor_->Next(SkipFrames);
+   }
++
++  //std::cout << "*** Chose frame " << cursor_->key() << " by random." << std::endl;
++  //std::cout.flush();
++
+   offset_++;
+ }
+ 
+@@ -115,11 +144,18 @@ void DataLayer<Dtype>::load_batch(Batch<Dtype>* batch) {
+     Dtype* top_data = batch->data_.mutable_cpu_data();
+     this->transformed_data_.set_cpu_data(top_data + offset);
+     this->data_transformer_->Transform(datum, &(this->transformed_data_));
+-    // Copy label.
+-    if (this->output_labels_) {
++
++    // Copy labels (all 14)
++    if (this->output_labels_)
++    {
+       Dtype* top_label = batch->label_.mutable_cpu_data();
+-      top_label[item_id] = datum.label();
++
++      for (int j = 0; j < LabelDimension; ++j)
++      {
++        top_label[item_id*LabelDimension+j] = datum.float_data(j);
++      }
+     }
++
+     trans_time += timer.MicroSeconds();
+     Next();
+   }
+diff --git a/src/caffe/layers/euclidean_loss_layer.cpp b/src/caffe/layers/euclidean_loss_layer.cpp
+index 300d991..efb75fc 100644
+--- a/src/caffe/layers/euclidean_loss_layer.cpp
++++ b/src/caffe/layers/euclidean_loss_layer.cpp
+@@ -18,13 +18,54 @@ template <typename Dtype>
+ void EuclideanLossLayer<Dtype>::Forward_cpu(const vector<Blob<Dtype>*>& bottom,
+     const vector<Blob<Dtype>*>& top) {
+   int count = bottom[0]->count();
++
++  // DeepDriving Changes: Normalize the training data before calculating the loss
++  //
++  // For any reason, the original DeepDriving training data is not normalized, thus
++  // we have to do it here before calculating the loss. This is very... ugly!
++  // Maybe it would be better to implement a script which preprocess the training
++  // data by normalizing it before training starts. I will think about it in a further
++  // implementation.
++
++  Dtype LabelArray[count];
++  const Dtype* Result = bottom[0]->cpu_data();
++  const Dtype* Label  = bottom[1]->cpu_data();
++  int BatchSize       = bottom[0]->num();
++  int OutputDimension = count/BatchSize;
++  for (int i = 0; i < BatchSize; ++i)
++  {
++
++    LabelArray[i * OutputDimension]      = Label[i*14+0]/1.1+0.5;     // angle range ~ [-0.5, 0.5]
++    if (LabelArray[i * OutputDimension]>1.0) LabelArray[i * OutputDimension]=1.0;
++    if (LabelArray[i * OutputDimension]<0.0) LabelArray[i * OutputDimension]=0.0;
++
++    LabelArray[i * OutputDimension + 1]  = Label[i*14+1]*0.17778+1.34445;   // toMarking_L range ~ [-7, -2.5]
++    LabelArray[i * OutputDimension + 2]  = Label[i*14+2]*0.14545+0.39091;   // toMarking_M range ~ [-2, 3.5]
++    LabelArray[i * OutputDimension + 3]  = Label[i*14+3]*0.17778-0.34445;   // toMarking_R range ~ [2.5, 7]
++    LabelArray[i * OutputDimension + 4]  = Label[i*14+4]/95.0+0.12;   // dist_L range ~ [0, 75]
++    LabelArray[i * OutputDimension + 5]  = Label[i*14+5]/95.0+0.12;   // dist_R range ~ [0, 75]
++    LabelArray[i * OutputDimension + 6]  = Label[i*14+6]*0.14545+1.48181;   // toMarking_LL range ~ [-9.5, -4]
++    LabelArray[i * OutputDimension + 7]  = Label[i*14+7]*0.16+0.98;   // toMarking_ML range ~ [-5.5, -0.5]
++    LabelArray[i * OutputDimension + 8]  = Label[i*14+8]*0.16+0.02;   // toMarking_MR range ~ [0.5, 5.5]
++    LabelArray[i * OutputDimension + 9]  = Label[i*14+9]*0.14545-0.48181;   // toMarking_RR range ~ [4, 9.5]
++    LabelArray[i * OutputDimension + 10] = Label[i*14+10]/95.0+0.12;   // dist_LL range ~ [0, 75]
++    LabelArray[i * OutputDimension + 11] = Label[i*14+11]/95.0+0.12;   // dist_MM range ~ [0, 75]
++    LabelArray[i * OutputDimension + 12] = Label[i*14+12]/95.0+0.12;   // dist_RR range ~ [0, 75]
++    LabelArray[i * OutputDimension + 13] = Label[i*14+13]*0.6+0.2;   // fast range ~ {0, 1}
++  }
++
++  // calculates the difference between result and label vector
+   caffe_sub(
+       count,
+-      bottom[0]->cpu_data(),
+-      bottom[1]->cpu_data(),
++      Result,
++      LabelArray,
+       diff_.mutable_cpu_data());
++
++  // the dot product of the difference
+   Dtype dot = caffe_cpu_dot(count, diff_.cpu_data(), diff_.cpu_data());
+-  Dtype loss = dot / bottom[0]->num() / Dtype(2);
++
++  // normalize it with the batch size and divide by 2 = the loss
++  Dtype loss = dot / BatchSize / Dtype(2);
+   top[0]->mutable_cpu_data()[0] = loss;
+ }
+ 
+diff --git a/src/caffe/layers/euclidean_loss_layer.cu b/src/caffe/layers/euclidean_loss_layer.cu
+index 4c221b6..c48b2f5 100644
+--- a/src/caffe/layers/euclidean_loss_layer.cu
++++ b/src/caffe/layers/euclidean_loss_layer.cu
+@@ -9,15 +9,86 @@ template <typename Dtype>
+ void EuclideanLossLayer<Dtype>::Forward_gpu(const vector<Blob<Dtype>*>& bottom,
+     const vector<Blob<Dtype>*>& top) {
+   int count = bottom[0]->count();
++  
++  // DeepDriving Changes: Normalize the training data before calculating the loss
++  //
++  // For any reason, the original DeepDriving training data is not normalized, thus
++  // we have to do it here before calculating the loss. This is very... ugly!
++  // Maybe it would be better to implement a script which preprocess the training
++  // data by normalizing it before training starts. I will think about it in a further
++  // implementation.
++  
++  int BatchSize = bottom[0]->num();   
++  int OutputDimension = count/BatchSize;
++  
++  const Dtype* CudaResult = bottom[0]->gpu_data();
++  const Dtype* CudaLabel  = bottom[1]->gpu_data();
++  
++  Dtype Label[BatchSize*14];
++  Dtype Result[count]; 
++  Dtype LabelArray[count];
++  
++  cudaMemcpy(Result, CudaResult, sizeof(Dtype) * count,          cudaMemcpyDeviceToHost);
++  cudaMemcpy(Label,  CudaLabel,  sizeof(Dtype) * BatchSize * 14, cudaMemcpyDeviceToHost);
++    
++  for (int i = 0; i < BatchSize; ++i) 
++  {
++    LabelArray[i * OutputDimension]      = Label[i*14+0]/1.1+0.5;     // angle range ~ [-0.5, 0.5]
++    if (LabelArray[i * OutputDimension]>1.0) LabelArray[i * OutputDimension]=1.0;
++    if (LabelArray[i * OutputDimension]<0.0) LabelArray[i * OutputDimension]=0.0;
++
++    LabelArray[i * OutputDimension + 1]  = Label[i*14+1]*0.17778+1.34445;   // toMarking_L range ~ [-7, -2.5]
++    LabelArray[i * OutputDimension + 2]  = Label[i*14+2]*0.14545+0.39091;   // toMarking_M range ~ [-2, 3.5]
++    LabelArray[i * OutputDimension + 3]  = Label[i*14+3]*0.17778-0.34445;   // toMarking_R range ~ [2.5, 7]
++    LabelArray[i * OutputDimension + 4]  = Label[i*14+4]/95.0+0.12;   // dist_L range ~ [0, 75]
++    LabelArray[i * OutputDimension + 5]  = Label[i*14+5]/95.0+0.12;   // dist_R range ~ [0, 75]
++    LabelArray[i * OutputDimension + 6]  = Label[i*14+6]*0.14545+1.48181;   // toMarking_LL range ~ [-9.5, -4]
++    LabelArray[i * OutputDimension + 7]  = Label[i*14+7]*0.16+0.98;   // toMarking_ML range ~ [-5.5, -0.5]
++    LabelArray[i * OutputDimension + 8]  = Label[i*14+8]*0.16+0.02;   // toMarking_MR range ~ [0.5, 5.5]
++    LabelArray[i * OutputDimension + 9]  = Label[i*14+9]*0.14545-0.48181;   // toMarking_RR range ~ [4, 9.5]
++    LabelArray[i * OutputDimension + 10] = Label[i*14+10]/95.0+0.12;   // dist_LL range ~ [0, 75]
++    LabelArray[i * OutputDimension + 11] = Label[i*14+11]/95.0+0.12;   // dist_MM range ~ [0, 75]
++    LabelArray[i * OutputDimension + 12] = Label[i*14+12]/95.0+0.12;   // dist_RR range ~ [0, 75]
++    LabelArray[i * OutputDimension + 13] = Label[i*14+13]*0.6+0.2;   // fast range ~ {0, 1}
++  }
++  
++  Dtype* CudaLabelArray;
++  cudaMalloc((void**)&CudaLabelArray,    sizeof(Dtype) * count);
++  cudaMemcpy(CudaLabelArray, LabelArray, sizeof(Dtype) * count, cudaMemcpyHostToDevice);
++  
+   caffe_gpu_sub(
+       count,
+-      bottom[0]->gpu_data(),
+-      bottom[1]->gpu_data(),
++      CudaResult,
++      CudaLabelArray,
+       diff_.mutable_gpu_data());
++      
+   Dtype dot;
+   caffe_gpu_dot(count, diff_.gpu_data(), diff_.gpu_data(), &dot);
+   Dtype loss = dot / bottom[0]->num() / Dtype(2);
+   top[0]->mutable_cpu_data()[0] = loss;
++
++  cudaFree(CudaLabelArray);
++  
++  /*
++  Dtype Differences[count]; 
++  cudaMemcpy(Differences, diff_.gpu_data(), sizeof(Dtype) * count, cudaMemcpyDeviceToHost);
++  
++  //for (int i = 0; i < BatchSize; ++i) 
++  {
++    int i=0;
++    for (int j = 0; j < OutputDimension; ++j) 
++    {
++      printf("BatchElement: %d, Value: %d, Result: %f, LabelArray: %f, diff: %f \n", 
++      	i, 
++      	j, 
++      	Result[i*OutputDimension+j], 
++      	LabelArray[i*OutputDimension+j], 
++      	Differences[i*OutputDimension+j]); 
++      fflush(stdout);
++    }    
++  }
++  printf("Current Loss: %f\n", loss);
++  */
+ }
+ 
+ template <typename Dtype>
+diff --git a/src/caffe/solver.cpp b/src/caffe/solver.cpp
+index fd4c037..35affa4 100644
+--- a/src/caffe/solver.cpp
++++ b/src/caffe/solver.cpp
+@@ -9,6 +9,8 @@
+ #include "caffe/util/io.hpp"
+ #include "caffe/util/upgrade_proto.hpp"
+ 
++#include <boost/filesystem.hpp>
++
+ namespace caffe {
+ 
+ template<typename Dtype>
+@@ -276,7 +278,8 @@ void Solver<Dtype>::Solve(const char* resume_file) {
+   // Initialize to false every time we start solving.
+   requested_early_exit_ = false;
+ 
+-  if (resume_file) {
++  if (resume_file)
++  {
+     LOG(INFO) << "Restoring previous solver status from " << resume_file;
+     Restore(resume_file);
+   }
+@@ -462,12 +465,31 @@ string Solver<Dtype>::SnapshotToHDF5() {
+ 
+ template <typename Dtype>
+ void Solver<Dtype>::Restore(const char* state_file) {
+-  string state_filename(state_file);
+-  if (state_filename.size() >= 3 &&
+-      state_filename.compare(state_filename.size() - 3, 3, ".h5") == 0) {
+-    RestoreSolverStateFromHDF5(state_filename);
+-  } else {
+-    RestoreSolverStateFromBinaryProto(state_filename);
++
++  boost::filesystem::path ResumeFile(state_file);
++  if (ResumeFile.extension() == ".solverstate")
++  {
++    string state_filename(state_file);
++    if (state_filename.size() >= 3 &&
++        state_filename.compare(state_filename.size() - 3, 3, ".h5") == 0) {
++      RestoreSolverStateFromHDF5(state_filename);
++    } else {
++      RestoreSolverStateFromBinaryProto(state_filename);
++    }
++  }
++  else if (ResumeFile.extension() == ".caffemodel")
++  {
++    LOG(INFO) << "Reset solver state, but resume from checkpoint " << ResumeFile;
++    NetParameter trained_net_param;
++    ReadNetParamsFromBinaryFileOrDie(ResumeFile.c_str(), &trained_net_param);
++    net_->CopyTrainedLayersFrom(trained_net_param);
++    iter_ = 0;
++  }
++  else
++  {
++    LOG(INFO) << "Detect file extension " << ResumeFile.extension();
++    LOG(ERROR) << "Cannot resume from file " << ResumeFile;
++    CHECK(false);
+   }
+ }
+ 
+-- 
+1.9.1
+
