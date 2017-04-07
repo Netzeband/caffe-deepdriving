@@ -9,6 +9,8 @@
 #include "caffe/layers/data_layer.hpp"
 #include "caffe/util/benchmark.hpp"
 
+#define LabelDimension 14
+
 namespace caffe {
 
 template <typename Dtype>
@@ -18,6 +20,9 @@ DataLayer<Dtype>::DataLayer(const LayerParameter& param)
   db_.reset(db::GetDB(param.data_param().backend()));
   db_->Open(param.data_param().source(), db::READ);
   cursor_.reset(db_->NewCursor());
+
+  std::random_device RandomDevice;
+  RandomGenerator.seed(RandomDevice());
 }
 
 template <typename Dtype>
@@ -48,7 +53,11 @@ void DataLayer<Dtype>::DataLayerSetUp(const vector<Blob<Dtype>*>& bottom,
       << top[0]->width();
   // label
   if (this->output_labels_) {
-    vector<int> label_shape(1, batch_size);
+    vector<int> label_shape(4);
+    label_shape[0] = batch_size;
+    label_shape[1] = 1;
+    label_shape[2] = 1;
+    label_shape[3] = LabelDimension;
     top[1]->Reshape(label_shape);
     for (int i = 0; i < this->prefetch_.size(); ++i) {
       this->prefetch_[i]->label_.Reshape(label_shape);
@@ -66,14 +75,34 @@ bool DataLayer<Dtype>::Skip() {
   return !keep;
 }
 
+#include <random>
+
 template<typename Dtype>
 void DataLayer<Dtype>::Next() {
-  cursor_->Next();
-  if (!cursor_->valid()) {
-    LOG_IF(INFO, Caffe::root_solver())
-        << "Restarting data prefetching from start.";
+  // DeepDrivingChanges: Introduce a random shuffle for the leveldb database by sometimes
+  //                     skipping frames
+  //
+  // While I can absolutely understand the performance considerations which lead to the
+  // the decision to not randomly shuffle LevelDB databases in Caffe by default, I can
+  // not understand why there is no option to force shuffle anyway, if the customer is
+  // willing to pay the performance penalty.
+  std::uniform_int_distribution<int> Random(0, 0xFFF);
+  int SkipFrames = Random(RandomGenerator);
+  //int SkipFrames = 0;
+  cursor_->Next(SkipFrames+1);
+
+  while(!cursor_->valid()) {
+    /*LOG_IF(INFO, Caffe::root_solver())
+        << "Restarting data prefetching from start.";*/
     cursor_->SeekToFirst();
+    std::uniform_int_distribution<int> Random(0, SkipFrames);
+    SkipFrames = Random(RandomGenerator);
+    cursor_->Next(SkipFrames);
   }
+
+  //std::cout << "*** Chose frame " << cursor_->key() << " by random." << std::endl;
+  //std::cout.flush();
+
   offset_++;
 }
 
@@ -115,11 +144,18 @@ void DataLayer<Dtype>::load_batch(Batch<Dtype>* batch) {
     Dtype* top_data = batch->data_.mutable_cpu_data();
     this->transformed_data_.set_cpu_data(top_data + offset);
     this->data_transformer_->Transform(datum, &(this->transformed_data_));
-    // Copy label.
-    if (this->output_labels_) {
+
+    // Copy labels (all 14)
+    if (this->output_labels_)
+    {
       Dtype* top_label = batch->label_.mutable_cpu_data();
-      top_label[item_id] = datum.label();
+
+      for (int j = 0; j < LabelDimension; ++j)
+      {
+        top_label[item_id*LabelDimension+j] = datum.float_data(j);
+      }
     }
+
     trans_time += timer.MicroSeconds();
     Next();
   }

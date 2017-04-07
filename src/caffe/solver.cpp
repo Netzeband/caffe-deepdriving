@@ -9,6 +9,8 @@
 #include "caffe/util/io.hpp"
 #include "caffe/util/upgrade_proto.hpp"
 
+#include <boost/filesystem.hpp>
+
 namespace caffe {
 
 template<typename Dtype>
@@ -276,7 +278,8 @@ void Solver<Dtype>::Solve(const char* resume_file) {
   // Initialize to false every time we start solving.
   requested_early_exit_ = false;
 
-  if (resume_file) {
+  if (resume_file)
+  {
     LOG(INFO) << "Restoring previous solver status from " << resume_file;
     Restore(resume_file);
   }
@@ -462,12 +465,31 @@ string Solver<Dtype>::SnapshotToHDF5() {
 
 template <typename Dtype>
 void Solver<Dtype>::Restore(const char* state_file) {
-  string state_filename(state_file);
-  if (state_filename.size() >= 3 &&
-      state_filename.compare(state_filename.size() - 3, 3, ".h5") == 0) {
-    RestoreSolverStateFromHDF5(state_filename);
-  } else {
-    RestoreSolverStateFromBinaryProto(state_filename);
+
+  boost::filesystem::path ResumeFile(state_file);
+  if (ResumeFile.extension() == ".solverstate")
+  {
+    string state_filename(state_file);
+    if (state_filename.size() >= 3 &&
+        state_filename.compare(state_filename.size() - 3, 3, ".h5") == 0) {
+      RestoreSolverStateFromHDF5(state_filename);
+    } else {
+      RestoreSolverStateFromBinaryProto(state_filename);
+    }
+  }
+  else if (ResumeFile.extension() == ".caffemodel")
+  {
+    LOG(INFO) << "Reset solver state, but resume from checkpoint " << ResumeFile;
+    NetParameter trained_net_param;
+    ReadNetParamsFromBinaryFileOrDie(ResumeFile.c_str(), &trained_net_param);
+    net_->CopyTrainedLayersFrom(trained_net_param);
+    iter_ = 0;
+  }
+  else
+  {
+    LOG(INFO) << "Detect file extension " << ResumeFile.extension();
+    LOG(ERROR) << "Cannot resume from file " << ResumeFile;
+    CHECK(false);
   }
 }
 

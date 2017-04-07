@@ -1,0 +1,4 @@
+build
+install
+python/caffe/_caffe.so
+python/caffe/proto/

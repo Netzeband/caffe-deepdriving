@@ -27,6 +27,7 @@ class LMDBCursor : public Cursor {
   }
   virtual void SeekToFirst() { Seek(MDB_FIRST); }
   virtual void Next() { Seek(MDB_NEXT); }
+  virtual void Next(int KeyDiff) { Next(); CHECK(false) << "Next(Diff) is not implemented yet!"; }
   virtual string key() {
     return string(static_cast<const char*>(mdb_key_.mv_data), mdb_key_.mv_size);
   }

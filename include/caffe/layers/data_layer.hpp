@@ -11,6 +11,8 @@
 #include "caffe/proto/caffe.pb.h"
 #include "caffe/util/db.hpp"
 
+#include <random>
+
 namespace caffe {
 
 template <typename Dtype>
@@ -35,6 +37,7 @@ class DataLayer : public BasePrefetchingDataLayer<Dtype> {
   shared_ptr<db::DB> db_;
   shared_ptr<db::Cursor> cursor_;
   uint64_t offset_;
+  std::mt19937 RandomGenerator;
 };
 
 }  // namespace caffe

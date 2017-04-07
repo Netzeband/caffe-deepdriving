@@ -20,7 +20,24 @@ class LevelDBCursor : public Cursor {
   }
   ~LevelDBCursor() { delete iter_; }
   virtual void SeekToFirst() { iter_->SeekToFirst(); }
-  virtual void Next() { iter_->Next(); }
+
+  virtual void Next(int KeyDiff)
+  {
+    int Key = std::atoi(key().c_str());
+    Key += KeyDiff;
+
+    static int const MaxKeyLength = 256;
+    char KeyString[MaxKeyLength];
+
+    snprintf(KeyString, MaxKeyLength, "%08d", Key);
+    iter_->Seek(leveldb::Slice(KeyString));
+  }
+
+  virtual void Next()
+  {
+    iter_->Next();
+  }
+
   virtual string key() { return iter_->key().ToString(); }
   virtual string value() { return iter_->value().ToString(); }
   virtual bool valid() { return iter_->Valid(); }
