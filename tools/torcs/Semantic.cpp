@@ -553,89 +553,89 @@ void CSemantic::drawErrorMeasurement()
     int i = 0;
 
     drawErrorBars(pSemanticImage, BarX, BarY + i * EntryHeight,
-        pErrorMeasurement->getCurrentSquaredError().DistLL,
-        pErrorMeasurement->getMeanSequaredError().DistLL,
+        pErrorMeasurement->getCurrentAbsuluteError().DistLL,
+        pErrorMeasurement->getMeanAbsoluteError().DistLL,
         1.0);
     i++;
 
     drawErrorBars(pSemanticImage, BarX, BarY + i * EntryHeight,
-        pErrorMeasurement->getCurrentSquaredError().DistMM,
-        pErrorMeasurement->getMeanSequaredError().DistMM,
+        pErrorMeasurement->getCurrentAbsuluteError().DistMM,
+        pErrorMeasurement->getMeanAbsoluteError().DistMM,
         1.0);
     i++;
 
     drawErrorBars(pSemanticImage, BarX, BarY + i * EntryHeight,
-        pErrorMeasurement->getCurrentSquaredError().DistRR,
-        pErrorMeasurement->getMeanSequaredError().DistRR,
+        pErrorMeasurement->getCurrentAbsuluteError().DistRR,
+        pErrorMeasurement->getMeanAbsoluteError().DistRR,
         1.0);
     i++;
 
     drawErrorBars(pSemanticImage, BarX, BarY + i * EntryHeight,
-        pErrorMeasurement->getCurrentSquaredError().LL,
-        pErrorMeasurement->getMeanSequaredError().LL,
+        pErrorMeasurement->getCurrentAbsuluteError().LL,
+        pErrorMeasurement->getMeanAbsoluteError().LL,
         1.0);
     i++;
 
     drawErrorBars(pSemanticImage, BarX, BarY + i * EntryHeight,
-        pErrorMeasurement->getCurrentSquaredError().ML,
-        pErrorMeasurement->getMeanSequaredError().ML,
+        pErrorMeasurement->getCurrentAbsuluteError().ML,
+        pErrorMeasurement->getMeanAbsoluteError().ML,
         1.0);
     i++;
 
     drawErrorBars(pSemanticImage, BarX, BarY + i * EntryHeight,
-        pErrorMeasurement->getCurrentSquaredError().MR,
-        pErrorMeasurement->getMeanSequaredError().MR,
+        pErrorMeasurement->getCurrentAbsuluteError().MR,
+        pErrorMeasurement->getMeanAbsoluteError().MR,
         1.0);
     i++;
 
     drawErrorBars(pSemanticImage, BarX, BarY + i * EntryHeight,
-        pErrorMeasurement->getCurrentSquaredError().RR,
-        pErrorMeasurement->getMeanSequaredError().RR,
-        1.0);
-    i++;
-    i++;
-
-    drawErrorBars(pSemanticImage, BarX, BarY + i * EntryHeight,
-        pErrorMeasurement->getCurrentSquaredError().DistL,
-        pErrorMeasurement->getMeanSequaredError().DistL,
-        1.0);
-    i++;
-
-    drawErrorBars(pSemanticImage, BarX, BarY + i * EntryHeight,
-        pErrorMeasurement->getCurrentSquaredError().DistR,
-        pErrorMeasurement->getMeanSequaredError().DistR,
-        1.0);
-    i++;
-
-    drawErrorBars(pSemanticImage, BarX, BarY + i * EntryHeight,
-        pErrorMeasurement->getCurrentSquaredError().L,
-        pErrorMeasurement->getMeanSequaredError().L,
-        1.0);
-    i++;
-
-    drawErrorBars(pSemanticImage, BarX, BarY + i * EntryHeight,
-        pErrorMeasurement->getCurrentSquaredError().M,
-        pErrorMeasurement->getMeanSequaredError().M,
-        1.0);
-    i++;
-
-    drawErrorBars(pSemanticImage, BarX, BarY + i * EntryHeight,
-        pErrorMeasurement->getCurrentSquaredError().R,
-        pErrorMeasurement->getMeanSequaredError().R,
+        pErrorMeasurement->getCurrentAbsuluteError().RR,
+        pErrorMeasurement->getMeanAbsoluteError().RR,
         1.0);
     i++;
     i++;
 
     drawErrorBars(pSemanticImage, BarX, BarY + i * EntryHeight,
-        pErrorMeasurement->getCurrentSquaredError().Angle,
-        pErrorMeasurement->getMeanSequaredError().Angle,
+        pErrorMeasurement->getCurrentAbsuluteError().DistL,
+        pErrorMeasurement->getMeanAbsoluteError().DistL,
+        1.0);
+    i++;
+
+    drawErrorBars(pSemanticImage, BarX, BarY + i * EntryHeight,
+        pErrorMeasurement->getCurrentAbsuluteError().DistR,
+        pErrorMeasurement->getMeanAbsoluteError().DistR,
+        1.0);
+    i++;
+
+    drawErrorBars(pSemanticImage, BarX, BarY + i * EntryHeight,
+        pErrorMeasurement->getCurrentAbsuluteError().L,
+        pErrorMeasurement->getMeanAbsoluteError().L,
+        1.0);
+    i++;
+
+    drawErrorBars(pSemanticImage, BarX, BarY + i * EntryHeight,
+        pErrorMeasurement->getCurrentAbsuluteError().M,
+        pErrorMeasurement->getMeanAbsoluteError().M,
+        1.0);
+    i++;
+
+    drawErrorBars(pSemanticImage, BarX, BarY + i * EntryHeight,
+        pErrorMeasurement->getCurrentAbsuluteError().R,
+        pErrorMeasurement->getMeanAbsoluteError().R,
         1.0);
     i++;
     i++;
 
     drawErrorBars(pSemanticImage, BarX, BarY + i * EntryHeight,
-        pErrorMeasurement->getCurrentSquaredError().calcLoss()*10,
-        pErrorMeasurement->getMeanSequaredError().calcLoss()*10,
+        pErrorMeasurement->getCurrentAbsuluteError().Angle,
+        pErrorMeasurement->getMeanAbsoluteError().Angle,
+        1.0);
+    i++;
+    i++;
+
+    drawErrorBars(pSemanticImage, BarX, BarY + i * EntryHeight,
+        pErrorMeasurement->getCurrentAbsuluteError().calcLoss()*10,
+        pErrorMeasurement->getMeanAbsoluteError().calcLoss()*10,
         14*4.0*0.5);
     i++;
 
