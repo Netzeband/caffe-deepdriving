@@ -14,6 +14,7 @@ For further details see the instructions:
 * [Drive in Torcs](https://github.com/Netzeband/caffe-deepdriving/wiki/Test)
 * [Train the Network](https://github.com/Netzeband/caffe-deepdriving/wiki/Training)
 * [Verify the Database](https://github.com/Netzeband/caffe-deepdriving/wiki/ErrorMeas)
+* [Record new Data](https://github.com/Netzeband/caffe-deepdriving/wiki/RecordData)
 
 Some YouTube-Videos from the project:
 
