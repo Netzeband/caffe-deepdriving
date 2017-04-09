@@ -39,7 +39,7 @@
 using namespace caffe;
 using std::string;
 
-int run(string DataPath);
+int run(string DataPath, int MaxFrames);
 
 int main(int argc, char** argv)
 {
@@ -55,7 +55,20 @@ int main(int argc, char** argv)
     return -1;
   }
 
-  return run(DatabasePath);
+  int Frames = -1;
+  string const FramesString = getArgument(argc, argv, "--frames");
+
+  if (!FramesString.empty())
+  {
+    Frames = atoi(FramesString.c_str());
+
+    if (Frames <= 0)
+    {
+      Frames = -1;
+    }
+  }
+
+  return run(DatabasePath, Frames);
 }
 
 bool processKeys(TorcsData_t &rData);
@@ -93,7 +106,7 @@ void writeToDatabase(int const Frame, db::Transaction *pTransaction, CImage cons
   pTransaction->Put(KeyString, ValueString);
 }
 
-int run(string DataPath)
+int run(string DataPath, int const MaxFrames)
 {
   CSharedMemory     TorcsMemory;
   CSemantic         Semantic;
@@ -111,6 +124,7 @@ int run(string DataPath)
 
   int FrameOffset = getLastKey(Database);
   int FrameNumber = 0;
+  int FrameLimit = MaxFrames;
 
   if (FrameOffset == 0)
   {
@@ -119,6 +133,11 @@ int run(string DataPath)
   else
   {
     std::cout << "Add all frames to the end of database with offset " << FrameOffset << std::endl;
+  }
+
+  if (FrameLimit > 0)
+  {
+    std::cout << "Collect exactly " << MaxFrames << " Frames." << std::endl;
   }
 
   db::Transaction * pTransaction = Database.NewTransaction();
@@ -155,6 +174,13 @@ int run(string DataPath)
     else
     {
       Semantic.show(pGroundTruth, 0, false);
+    }
+
+    if (FrameLimit > 0 && FrameNumber >= FrameLimit)
+    {
+      TorcsMemory.TorcsData.IsRecording = false;
+      std::cout << "Reached maximum number of frames. Press 'r' to record another " << MaxFrames << " frames.";
+      FrameLimit = MaxFrames + FrameNumber;
     }
 
     IsEnd = processKeys(TorcsMemory.TorcsData);

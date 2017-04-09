@@ -9,6 +9,7 @@ if [ -z "$DEEPDRIVING_CAFFE_PATH" ]; then
 else
 
   DATA=$1
+  FRAMES=$2
 
   if [ -z "$DATA" ]; then
     echo "ERROR: Please specify a data path as first argument."
@@ -20,7 +21,11 @@ else
   echo "Use Weights: " $WEIGTHS
 
   BIN_PATH=$DEEPDRIVING_CAFFE_PATH/bin
-  GLOG_logtostderr=1 $BIN_PATH/torcs_record --data $DATA
+  if [ -z "$FRAMES" ]; then
+    GLOG_logtostderr=1 $BIN_PATH/torcs_record --data $DATA
+  else
+    GLOG_logtostderr=1 $BIN_PATH/torcs_record --data $DATA --frames $FRAMES
+  fi
 fi
 
 
