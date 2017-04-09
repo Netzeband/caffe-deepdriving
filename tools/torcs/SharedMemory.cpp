@@ -68,6 +68,7 @@ CSharedMemory::CSharedMemory():
 {
   attach();
   initMemory();
+  TorcsData.IsRecording = false;
 }
 
 CSharedMemory::~CSharedMemory()

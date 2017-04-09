@@ -37,6 +37,22 @@ void CLabel::readFromDatum(Datum const &rData)
   Indicators.Fast                               = rData.float_data(13);
 }
 
-
+void CLabel::writeToDatum(caffe::Datum &rData, Indicators_t const &rIndicators)
+{
+  rData.add_float_data(rIndicators.Angle);
+  rData.add_float_data(rIndicators.DistanceToLeftMarking);
+  rData.add_float_data(rIndicators.DistanceToCenterMarking);
+  rData.add_float_data(rIndicators.DistanceToRightMarking);
+  rData.add_float_data(rIndicators.DistanceToLeftObstacle);
+  rData.add_float_data(rIndicators.DistanceToRightObstacle);
+  rData.add_float_data(rIndicators.DistanceToLeftMarkingOfLeftLane);
+  rData.add_float_data(rIndicators.DistanceToLeftMarkingOfCenterLane);
+  rData.add_float_data(rIndicators.DistanceToRightMarkingOfCenterLane);
+  rData.add_float_data(rIndicators.DistanceToRightMarkingOfRightLane);
+  rData.add_float_data(rIndicators.DistanceToLeftObstacleInLane);
+  rData.add_float_data(rIndicators.DistanceToCenterObstacleInLane);
+  rData.add_float_data(rIndicators.DistanceToRightObstacleInLane);
+  rData.add_float_data(rIndicators.Fast);
+}
 
 

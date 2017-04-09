@@ -73,6 +73,29 @@ void CImage::readFromDatum(caffe::Datum const &rData)
   }
 }
 
+void CImage::writeToDatum(caffe::Datum &rData) const
+{
+  rData.set_channels(3);
+  rData.set_height(pImage->height);
+  rData.set_width(pImage->width);
+  rData.set_label(0);
+  rData.clear_data();
+  rData.clear_float_data();
+
+  string* pImageString = rData.mutable_data();
+
+  for (int c = 0; c < 3; ++c)
+  {
+    for (int h = 0; h < pImage->height; ++h)
+    {
+      for (int w = 0; w < pImage->width; ++w)
+      {
+        pImageString->push_back(static_cast<char>(pImage->imageData[(h*pImage->width+w)*3+c]));
+      }
+    }
+  }
+}
+
 void CImage::readFromMemory(uint8_t * pMemory, int SourceWidth, int SourceHeight)
 {
   readFromMemory(pMemory, SourceWidth, SourceHeight, SourceWidth, SourceHeight);

@@ -21,6 +21,7 @@ typedef struct
   double Breaking;
   bool   IsAIControlled;
   bool   ShowGroundTruth;
+  bool   IsRecording;
 } TorcsData_t;
 
 class CSharedMemory

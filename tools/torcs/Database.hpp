@@ -25,6 +25,9 @@ class CLabel
 
     /// @brief Reads the labels from a datum.
     void readFromDatum(caffe::Datum const &rData);
+
+    /// @brief Writes the labels to a datum.
+    static void writeToDatum(caffe::Datum &rData, Indicators_t const &rIndicators);
 };
 
 #endif /* DATABASE_HPP_ */

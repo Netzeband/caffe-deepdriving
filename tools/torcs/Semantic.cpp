@@ -282,24 +282,31 @@ void CSemantic::drawAdditionalData()
       cvPutText(pSemanticImage, "[Pause]", cvPoint(380, 275), &Font, cvScalar(0, 0, 255));
     }
 
-    // print control state
-    if (!pAdditionalData->IsControlling)
+    if (pAdditionalData->IsRecording)
     {
-      cvPutText(pSemanticImage, "[Disabled]", cvPoint(470, 275), &Font, cvScalar(0, 0, 255));
+      cvPutText(pSemanticImage, "[Recording]", cvPoint(470, 275), &Font, cvScalar(255, 255, 255));
     }
     else
     {
-      cvPutText(pSemanticImage, "[Enabled]", cvPoint(470, 275), &Font, cvScalar(255, 255, 255));
-    }
+      // print control state
+      if (!pAdditionalData->IsControlling)
+      {
+        cvPutText(pSemanticImage, "[Disabled]", cvPoint(470, 275), &Font, cvScalar(0, 0, 255));
+      }
+      else
+      {
+        cvPutText(pSemanticImage, "[Enabled]", cvPoint(470, 275), &Font, cvScalar(255, 255, 255));
+      }
 
-    // print AI state
-    if (!pAdditionalData->IsAIControlled)
-    {
-      cvPutText(pSemanticImage, "[no AI]", cvPoint(580, 275), &Font, cvScalar(0, 0, 255));
-    }
-    else
-    {
-      cvPutText(pSemanticImage, "[AI]", cvPoint(580, 275), &Font, cvScalar(255, 255, 255));
+      // print AI state
+      if (!pAdditionalData->IsAIControlled)
+      {
+        cvPutText(pSemanticImage, "[no AI]", cvPoint(580, 275), &Font, cvScalar(0, 0, 255));
+      }
+      else
+      {
+        cvPutText(pSemanticImage, "[AI]", cvPoint(580, 275), &Font, cvScalar(255, 255, 255));
+      }
     }
   }
 }

@@ -80,13 +80,10 @@ set(torcs_verify_fast_source
 )
 compile_tool(torcs_verify_fast "${torcs_verify_fast_source}")
 
-#set(torcs_files
-#  torcs-files/semantic_background.png
-#  torcs-files/semantic_background_big.png
-#  torcs-files/semantic_1lane.png
-#  torcs-files/semantic_2lane.png
-#  torcs-files/semantic_3lane.png
-#)
-#
-#install(FILES ${torcs_files} DESTINATION bin)
+set(torcs_record_source
+  torcs_record.cpp
+  ${torcs_library_source}
+)
+compile_tool(torcs_record "${torcs_record_source}")
+
 

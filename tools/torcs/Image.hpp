@@ -24,6 +24,9 @@ class CImage
     /// @brief Reads the image form a datum.
     void readFromDatum(caffe::Datum const &rData);
 
+    /// @brief Writes the image to a datum.
+    void writeToDatum(caffe::Datum &rData) const;
+
     /// @brief Read the image from memory location.
     void readFromMemory(uint8_t * pMemory, int SourceWidth, int SourceHeight);
     void readFromMemory(uint8_t * pMemory, int SourceWidth, int SourceHeight, int TargetWidth, int TargetHeight);
