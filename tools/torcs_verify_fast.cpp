@@ -107,7 +107,7 @@ int main(int argc, char** argv)
 
 int verify(string DataPath, string ModelPath, string WeightsPath, string MeanPath, int GPUDevice)
 {
-  int const BatchSize = 64;
+  int const BatchSize = 128;
   int const NumberUntilOutput = 1000;
 
   CLabel            Label[BatchSize];
@@ -122,6 +122,9 @@ int verify(string DataPath, string ModelPath, string WeightsPath, string MeanPat
   db::LevelDBCursor * pCursor = Database.NewCursor();
   CHECK(pCursor)          << "Cannot generate cursor from database \'" << DataPath << "\'.";
   CHECK(pCursor->valid()) << "Database \'" << DataPath << "\' is empty.";
+
+  std::cout << "* Verify database: " << DataPath << std::endl;
+  std::cout << "* Checkpoint: " << WeightsPath << std::endl;
 
   int FrameNumber = 1;
   int OutputCounter = NumberUntilOutput;

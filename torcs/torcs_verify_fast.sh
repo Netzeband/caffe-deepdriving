@@ -9,8 +9,8 @@ if [ -z "$DEEPDRIVING_CAFFE_PATH" ]; then
 else
 
   DATABASE=$1
-  MODEL=$2
-  WEIGHTS=$3
+  WEIGHTS=$2
+  MODEL=$3
   MEAN=$4
   GPU=$5
 
